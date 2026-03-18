@@ -1,0 +1,37 @@
+[project]
+name = "marketresearch-backend"
+version = "0.1.0"
+description = "Backend service for the market research MVP"
+requires-python = ">=3.11"
+dependencies = [
+    "alembic>=1.14.0",
+    "beautifulsoup4>=4.12.3",
+    "fastapi>=0.115.0",
+    "httpx>=0.28.0",
+    "langgraph>=0.2.74",
+    "openai>=1.68.2",
+    "playwright>=1.52.0",
+    "pydantic-settings>=2.7.1",
+    "sqlalchemy>=2.0.38",
+    "uvicorn>=0.34.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.5",
+    "pytest-cov>=6.0.0",
+]
+
+[build-system]
+requires = ["setuptools>=80.0.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

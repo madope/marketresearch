@@ -1,0 +1,90 @@
+<h2>市场调研站点布局方向</h2>
+<p class="subtitle">目标：单用户内部工具，强调“发起任务快、看结果快、回看历史快”</p>
+
+<div class="cards">
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">A. Command Center</div>
+        <div class="mockup-body">
+          <div class="mock-nav">Market Research | New Task | History | Settings</div>
+          <div style="display:flex; gap:12px; margin-top:12px;">
+            <div class="mock-sidebar" style="width:22%;">历史记录列表</div>
+            <div style="flex:1; display:flex; flex-direction:column; gap:10px;">
+              <div class="mock-content" style="height:90px;">聊天输入框 + 提交按钮 + 当前任务进度</div>
+              <div style="display:flex; gap:10px;">
+                <div class="mock-content" style="flex:1; height:170px;">价格报表</div>
+                <div class="mock-content" style="flex:1; height:170px;">市场分析</div>
+              </div>
+              <div class="mock-content" style="height:120px;">任务摘要 / 平台覆盖 / 风险提示</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A. 指挥台式</h3>
+      <p>左侧固定历史记录，右侧集中输入、进度和结果。效率最高，最适合内部工具。</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">B. Narrative Report</div>
+        <div class="mockup-body">
+          <div class="mock-nav">Logo | Start Research | Reports</div>
+          <div class="mock-content" style="height:90px; margin-top:12px;">顶部大输入框 + 示例提示词</div>
+          <div class="mock-content" style="height:80px; margin-top:10px;">工作流进度时间线</div>
+          <div class="mock-content" style="height:160px; margin-top:10px;">市场分析主报告</div>
+          <div class="mock-content" style="height:140px; margin-top:10px;">价格表格与图表</div>
+          <div class="mock-content" style="height:90px; margin-top:10px;">历史记录横向卡片</div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B. 报告叙事式</h3>
+      <p>更像研究报告阅读器，结果阅读体验更强，但历史切换和高频操作效率略差。</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="c" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">C. Split Workspace</div>
+        <div class="mockup-body">
+          <div class="mock-nav">Research Workspace</div>
+          <div style="display:flex; gap:12px; margin-top:12px;">
+            <div class="mock-content" style="width:34%; height:380px;">左侧聊天区<br/>输入、追问、阶段日志</div>
+            <div style="flex:1; display:flex; flex-direction:column; gap:10px;">
+              <div class="mock-content" style="height:160px;">上：市场分析</div>
+              <div class="mock-content" style="height:160px;">下：价格表格</div>
+              <div class="mock-content" style="height:50px;">底部标签：历史 / 详情 / 导出</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>C. 工作台分屏式</h3>
+      <p>聊天感最强，适合后续做多轮追问，但首版会让信息密度偏高，移动端也更难收敛。</p>
+    </div>
+  </div>
+</div>
+
+<div class="pros-cons" style="margin-top:20px;">
+  <div class="pros">
+    <h4>推荐</h4>
+    <ul>
+      <li>首版建议选 A，再借一点 C 的“进度面板”表达。</li>
+      <li>原因是它最适合“发起任务 + 查看历史 + 比较结果”的内部工具场景。</li>
+    </ul>
+  </div>
+  <div class="cons">
+    <h4>注意</h4>
+    <ul>
+      <li>如果你更重视“像 AI 聊天产品”，C 会更贴近，但实现和布局控制更难。</li>
+      <li>如果你更重视“像研究报告平台”，B 更合适，但不利于高频查询。</li>
+    </ul>
+  </div>
+</div>

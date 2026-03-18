@@ -1,0 +1,67 @@
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Any
+
+from pydantic import BaseModel, Field
+
+
+class CreateResearchTaskRequest(BaseModel):
+    prompt: str = Field(min_length=3)
+
+
+class TaskSummaryResponse(BaseModel):
+    task_id: str
+    prompt: str
+    status: str
+    summary: str | None
+    created_at: datetime
+
+
+class CreateResearchTaskResponse(BaseModel):
+    task_id: str
+    status: str
+
+
+class CancelResearchTasksResponse(BaseModel):
+    status: str
+    cancelled_count: int
+
+
+class StageStatusResponse(BaseModel):
+    workflow_name: str
+    stage_name: str
+    status: str
+    message: str | None
+    retry_count: int
+    detail_json: dict[str, Any] | None = None
+
+
+class ResearchTaskStatusResponse(BaseModel):
+    task_id: str
+    status: str
+    stages: list[StageStatusResponse]
+
+
+class ProductResponse(BaseModel):
+    product_name: str
+    source_type: str
+    input_order: int
+
+
+class PlatformResponse(BaseModel):
+    platform_name: str
+    platform_domain: str
+    platform_url: str | None = None
+    platform_summary: str | None = None
+    discover_round: int
+    platform_type: str
+
+
+class ResearchTaskDetailResponse(BaseModel):
+    task: TaskSummaryResponse
+    products: list[ProductResponse]
+    platforms: list[PlatformResponse]
+    price_report: dict[str, Any] | None
+    market_analysis: dict[str, Any] | None
+    stages: list[StageStatusResponse]

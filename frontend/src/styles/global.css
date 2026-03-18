@@ -1,0 +1,36 @@
+:root {
+  color: #ecffff;
+  background:
+    radial-gradient(circle at top left, rgba(32, 132, 255, 0.22), transparent 32%),
+    radial-gradient(circle at bottom right, rgba(38, 255, 212, 0.18), transparent 24%),
+    linear-gradient(180deg, #020714 0%, #061227 52%, #02050e 100%);
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background-image:
+    linear-gradient(rgba(87, 224, 255, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(87, 224, 255, 0.05) 1px, transparent 1px);
+  background-size: 60px 60px;
+}
+
+button,
+textarea {
+  font: inherit;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin-top: 0;
+}
