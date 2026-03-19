@@ -34,10 +34,54 @@ export interface StageStatus {
 export interface PriceReportRow {
   product_name: string;
   platform_name: string;
-  normalized_price: number;
+  platform_domain?: string;
+  product_url?: string | null;
+  normalized_price: number | null;
   currency: string;
   source?: string;
+  notes?: string;
   attempt_count?: number;
+}
+
+export interface ProductPlatformPriceSeries {
+  platform_name: string;
+  values: Array<number | null>;
+}
+
+export interface CoverageCell {
+  product_name: string;
+  platform_name: string;
+  has_price: boolean;
+  price: number | null;
+  product_url: string;
+}
+
+export interface PriceReportCharts {
+  product_platform_prices: {
+    products: string[];
+    series: ProductPlatformPriceSeries[];
+  };
+  platform_average_prices: Array<{
+    platform_name: string;
+    average_price: number;
+    sample_size: number;
+  }>;
+  coverage_matrix: {
+    products: string[];
+    platforms: string[];
+    cells: CoverageCell[];
+  };
+  source_breakdown: Array<{
+    source: string;
+    count: number;
+  }>;
+  product_price_ranges: Array<{
+    product_name: string;
+    min_price: number;
+    max_price: number;
+    average_price: number;
+    sample_size: number;
+  }>;
 }
 
 export interface PriceReport {
@@ -45,11 +89,13 @@ export interface PriceReport {
   highest_price: number;
   lowest_price: number;
   sample_size: number;
+  row_count?: number;
   platform_count: number;
   fallback_used: boolean;
   warnings: string[];
   source_breakdown: Record<string, number>;
   platform_source_breakdown?: Record<string, number>;
+  charts?: PriceReportCharts;
   rows: PriceReportRow[];
 }
 

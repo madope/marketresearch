@@ -345,7 +345,7 @@ def test_price_crawler_keeps_record_when_page_fetch_fails() -> None:
 
 
 def test_normalize_price_records_standardizes_numeric_fields() -> None:
-    rows = normalize_price_records(
+    rows, stats = normalize_price_records(
         [
             {
                 "product_name": "电动牙刷",
@@ -367,3 +367,90 @@ def test_normalize_price_records_standardizes_numeric_fields() -> None:
     assert rows[0]["raw_price"] == 299.5
     assert rows[0]["normalized_price"] == 299.5
     assert rows[0]["confidence_score"] == 0.83
+    assert rows[0]["currency"] == "CNY"
+    assert rows[0]["price_unit"] == "件"
+    assert stats["input_count"] == 1
+    assert stats["final_count"] == 1
+
+
+def test_normalize_price_records_filters_invalid_rows_and_deduplicates() -> None:
+    rows, stats = normalize_price_records(
+        [
+            {
+                "product_name": "电动牙刷",
+                "platform_name": "京东",
+                "platform_domain": "jd.com",
+                "product_url": "https://jd.com/item/1",
+                "raw_title": "电动牙刷A",
+                "spec_text": "默认规格",
+                "currency": "cny",
+                "raw_price": "199.00",
+                "normalized_price": None,
+                "price_unit": "个",
+                "confidence_score": "0.72",
+                "is_outlier": False,
+                "attempt_count": "2",
+                "source": "markdown_llm_price",
+            },
+            {
+                "product_name": "电动牙刷",
+                "platform_name": "京东",
+                "platform_domain": "jd.com",
+                "product_url": "https://jd.com/item/1",
+                "raw_title": "电动牙刷A-重复",
+                "spec_text": "默认规格",
+                "currency": "CNY",
+                "raw_price": "199.00",
+                "normalized_price": "199.00",
+                "price_unit": "件",
+                "confidence_score": "0.91",
+                "is_outlier": False,
+                "attempt_count": 1,
+                "source": "markdown_llm_price",
+            },
+            {
+                "product_name": "电动牙刷",
+                "platform_name": "淘宝",
+                "platform_domain": "taobao.com",
+                "product_url": "https://taobao.com/item/2",
+                "raw_title": "电动牙刷B",
+                "spec_text": "默认规格",
+                "currency": "CNY",
+                "raw_price": None,
+                "normalized_price": None,
+                "price_unit": None,
+                "confidence_score": 0.1,
+                "is_outlier": False,
+                "source": "markdown_llm_unpriced",
+            },
+            {
+                "product_name": "电动牙刷",
+                "platform_name": "拼多多",
+                "platform_domain": "pinduoduo.com",
+                "product_url": "https://pinduoduo.com/item/3",
+                "raw_title": "电动牙刷C",
+                "spec_text": "默认规格",
+                "currency": "CNY",
+                "raw_price": "abc",
+                "normalized_price": "abc",
+                "price_unit": "台",
+                "confidence_score": 0.5,
+                "is_outlier": False,
+                "source": "markdown_llm_price",
+            },
+        ]
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["normalized_price"] == 199.0
+    assert rows[0]["raw_price"] == 199.0
+    assert rows[0]["price_unit"] == "件"
+    assert rows[0]["confidence_score"] == 0.91
+    assert rows[0]["attempt_count"] == 1
+    assert stats == {
+        "input_count": 4,
+        "removed_missing_price_count": 1,
+        "removed_invalid_format_count": 1,
+        "removed_duplicate_count": 1,
+        "final_count": 1,
+    }

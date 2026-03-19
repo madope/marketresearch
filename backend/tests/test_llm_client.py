@@ -46,6 +46,8 @@ def test_llm_client_falls_back_when_volcengine_not_enabled(monkeypatch) -> None:
 
 
 def test_volcengine_ark_client_uses_chat_completions_for_text(monkeypatch) -> None:
+    captured_init = {}
+
     class FakeCompletions:
         def __init__(self) -> None:
             self.called = False
@@ -68,6 +70,7 @@ def test_volcengine_ark_client_uses_chat_completions_for_text(monkeypatch) -> No
 
     class FakeOpenAI:
         def __init__(self, *args, **kwargs) -> None:
+            captured_init.update(kwargs)
             self.chat = type("Chat", (), {"completions": FakeCompletions()})()
 
     settings = Settings(
@@ -84,6 +87,8 @@ def test_volcengine_ark_client_uses_chat_completions_for_text(monkeypatch) -> No
     assert result.status == "success"
     assert result.value == "ok"
     assert client._client.chat.completions.called is True
+    assert captured_init["timeout"] == 300
+    assert captured_init["max_retries"] == 0
 
 
 def test_volcengine_ark_client_uses_chat_completions_for_json(monkeypatch) -> None:

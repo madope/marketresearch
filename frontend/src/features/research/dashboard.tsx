@@ -1,5 +1,6 @@
 import { useState } from "react";
 
+import { PriceChartsPanel } from "./price_charts";
 import type { ResearchTaskDetail, ResearchTaskSummary, StageStatus } from "./types";
 
 import "./dashboard.css";
@@ -16,6 +17,28 @@ interface DashboardProps {
   onSelectTask: (taskId: string) => void;
 }
 
+const WORKFLOW_LABELS: Record<string, string> = {
+  price_research: "价格调研",
+  market_analysis: "市场分析",
+};
+
+const STAGE_LABELS: Record<string, string> = {
+  llm_select_products: "大模型识别产品",
+  parse_product_intent: "解析产品意图",
+  select_products: "确定调研产品",
+  llm_select_final_platforms: "大模型筛选平台",
+  discover_platforms: "发现平台",
+  crawl_prices_parallel: "抓取价格",
+  normalize_prices: "标准化价格",
+  analyze_prices: "分析价格",
+  llm_summarize_price_risks: "总结价格风险",
+  extract_business_topic: "提取商业主题",
+  analyze_revenue_model: "分析盈利模式",
+  analyze_competition_and_outlook: "分析竞争与前景",
+  build_from_zero_plan: "从零构建方案",
+  llm_build_from_zero_plan: "大模型生成构建方案",
+};
+
 export function Dashboard({
   tasks,
   selectedTask,
@@ -30,6 +53,9 @@ export function Dashboard({
   const [prompt, setPrompt] = useState("");
   const [expandedStageKey, setExpandedStageKey] = useState<string | null>(null);
   const progressStages: StageStatus[] = selectedTask?.stages ?? [];
+
+  const getWorkflowLabel = (workflowName: string) => WORKFLOW_LABELS[workflowName] ?? workflowName;
+  const getStageLabel = (stageName: string) => STAGE_LABELS[stageName] ?? stageName;
 
   const formatStageDetail = (stage: StageStatus) => {
     if (stage.detail_json) {
@@ -63,36 +89,6 @@ export function Dashboard({
             <h1>市场调研工作台</h1>
             <p className="lead">输入调研需求，触发 LangGraph 工作流，查看价格报表与商业模式分析。</p>
           </div>
-          <form
-            className="prompt-form"
-            onSubmit={(event) => {
-              event.preventDefault();
-              const trimmed = prompt.trim();
-              if (!trimmed) {
-                return;
-              }
-              onSubmit(trimmed);
-              setPrompt("");
-            }}
-          >
-            <label htmlFor="research-prompt">调研需求</label>
-            <textarea
-              id="research-prompt"
-              value={prompt}
-              onChange={(event) => setPrompt(event.target.value)}
-              placeholder="例如：调研中国大陆宠物烘干箱市场"
-              rows={4}
-            />
-            <div className="hero-actions">
-              <button type="submit" disabled={isSubmitting || isCancelling}>
-                {isSubmitting ? "提交中..." : "开始调研"}
-              </button>
-              <button type="button" className="secondary-button" disabled={!canCancel || isCancelling} onClick={onCancelAllTasks}>
-                {isCancelling ? "中止中..." : "中止调研"}
-              </button>
-              <span>{isPolling ? "当前任务进行中" : "等待新任务"}</span>
-            </div>
-          </form>
         </section>
 
         <section className="panel-grid">
@@ -102,9 +98,9 @@ export function Dashboard({
               <h2>任务进度</h2>
             </div>
             <div className="stage-list">
-              {progressStages.map((stage) => (
+              {progressStages.map((stage, index) => (
                 (() => {
-                  const stageKey = `${stage.workflow_name}-${stage.stage_name}`;
+                  const stageKey = `${stage.workflow_name}-${stage.stage_name}-${stage.status}-${stage.message ?? ""}-${index}`;
                   const isExpanded = expandedStageKey === stageKey;
                   const canShowDetails =
                     stage.status !== "running" && (Boolean(stage.message) || Boolean(stage.detail_json));
@@ -114,10 +110,10 @@ export function Dashboard({
                       key={stageKey}
                       className={`stage-row stage-status-${stage.status} ${isExpanded ? "stage-row-expanded" : ""}`}
                     >
-                      <span>{stage.workflow_name}</span>
+                      <span>{getWorkflowLabel(stage.workflow_name)}</span>
                       <div className="stage-body">
                         <div className="stage-header">
-                          <strong>{stage.stage_name}</strong>
+                          <strong>{getStageLabel(stage.stage_name)}</strong>
                           {canShowDetails && (
                             <button
                               type="button"
@@ -147,42 +143,92 @@ export function Dashboard({
 
           <section className="glass-panel">
             <div className="panel-header">
-              <p className="eyebrow">Snapshot</p>
-              <h2>价格概览</h2>
+              <p className="eyebrow">Command</p>
+              <h2>发起调研</h2>
             </div>
-            {selectedTask?.price_report ? (
-              <>
-                {selectedTask.price_report.warnings.length > 0 && (
-                  <div className="warning-list">
-                    {selectedTask.price_report.warnings.map((warning) => (
-                      <p key={warning} className="warning-chip">
-                        {warning}
-                      </p>
-                    ))}
-                  </div>
-                )}
-                <div className="metric-grid">
-                  <div className="metric-card">
-                    <span>均价</span>
-                    <strong>¥{selectedTask.price_report.average_price}</strong>
-                  </div>
-                  <div className="metric-card">
-                    <span>最高价</span>
-                    <strong>¥{selectedTask.price_report.highest_price}</strong>
-                  </div>
-                  <div className="metric-card">
-                    <span>最低价</span>
-                    <strong>¥{selectedTask.price_report.lowest_price}</strong>
-                  </div>
-                  <div className="metric-card">
-                    <span>样本量</span>
-                    <strong>{selectedTask.price_report.sample_size}</strong>
-                  </div>
-                </div>
-              </>
-            ) : (
-              <p className="empty-state">暂无价格报表。</p>
-            )}
+            <form
+              className="prompt-form prompt-form-panel"
+              onSubmit={(event) => {
+                event.preventDefault();
+                const trimmed = prompt.trim();
+                if (!trimmed) {
+                  return;
+                }
+                onSubmit(trimmed);
+                setPrompt("");
+              }}
+            >
+              <label htmlFor="research-prompt">调研需求</label>
+              <textarea
+                id="research-prompt"
+                value={prompt}
+                onChange={(event) => setPrompt(event.target.value)}
+                placeholder="例如：调研中国大陆宠物烘干箱市场"
+                rows={3}
+              />
+              <div className="hero-actions">
+                <button type="submit" className="hero-action-button" disabled={isSubmitting || isCancelling}>
+                  {isSubmitting ? "提交中..." : "开始调研"}
+                </button>
+                <button
+                  type="button"
+                  className="hero-action-button secondary-button"
+                  disabled={!canCancel || isCancelling}
+                  onClick={onCancelAllTasks}
+                >
+                  {isCancelling ? "中止中..." : "中止调研"}
+                </button>
+                <span className="hero-status-text">{isPolling ? "当前任务进行中" : "等待新任务"}</span>
+              </div>
+            </form>
+          </section>
+
+          <section className="glass-panel span-two">
+            <div className="panel-header">
+              <p className="eyebrow">Charts</p>
+              <h2>价格分析图表</h2>
+            </div>
+            <PriceChartsPanel priceReport={selectedTask?.price_report ?? null} />
+          </section>
+
+          <section className="glass-panel span-two">
+            <div className="panel-header">
+              <p className="eyebrow">Results</p>
+              <h2>价格表格</h2>
+            </div>
+            <div className="table-shell">
+              <table>
+                <thead>
+                  <tr>
+                    <th>产品</th>
+                    <th>平台</th>
+                    <th>价格页 URL</th>
+                    <th>价格</th>
+                    <th>来源</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {selectedTask?.price_report?.rows?.map((row, index) => (
+                    <tr key={`${row.product_name}-${row.platform_name}-${index}`}>
+                      <td>{row.product_name}</td>
+                      <td>{row.platform_name}</td>
+                      <td>
+                        {row.product_url ? (
+                          <a href={row.product_url} target="_blank" rel="noreferrer">
+                            {row.product_url}
+                          </a>
+                        ) : (
+                          "--"
+                        )}
+                      </td>
+                      <td>{row.normalized_price ?? "--"}</td>
+                      <td>{row.source ?? "--"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {!selectedTask?.price_report?.rows?.length && <p className="empty-state">暂无价格明细。</p>}
+            </div>
           </section>
 
           <section className="glass-panel span-two">
@@ -214,36 +260,6 @@ export function Dashboard({
             ) : (
               <p className="empty-state">暂无市场分析。</p>
             )}
-          </section>
-
-          <section className="glass-panel span-two">
-            <div className="panel-header">
-              <p className="eyebrow">Results</p>
-              <h2>价格表格</h2>
-            </div>
-            <div className="table-shell">
-              <table>
-                <thead>
-                  <tr>
-                    <th>产品</th>
-                    <th>平台</th>
-                    <th>价格</th>
-                    <th>币种</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {selectedTask?.price_report?.rows?.map((row, index) => (
-                    <tr key={`${row.product_name}-${row.platform_name}-${index}`}>
-                      <td>{row.product_name}</td>
-                      <td>{row.platform_name}</td>
-                      <td>{row.normalized_price}</td>
-                      <td>{row.currency}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {!selectedTask?.price_report?.rows?.length && <p className="empty-state">暂无价格明细。</p>}
-            </div>
           </section>
         </section>
       </main>

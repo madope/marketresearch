@@ -4,10 +4,12 @@ from concurrent.futures import Future
 from app.core.config import Settings
 from app.services.kimi_client import LLMResult
 from app.workflows.research_workflow import (
-    _llm_review_price_rows,
+    analyze_prices,
+    build_from_zero_plan,
     crawl_prices_parallel,
     discover_platforms,
     get_research_graph,
+    normalize_prices,
     run_research_workflow,
 )
 
@@ -87,42 +89,6 @@ def test_run_research_workflow_records_error_stage_when_model_request_fails(monk
     assert result.summary
 
 
-def test_llm_review_price_rows_limits_preview_rows_to_five(monkeypatch: pytest.MonkeyPatch) -> None:
-    captured_prompt = {}
-    rows = [
-        {
-            "product_name": f"产品{i}",
-            "platform_name": "平台A",
-            "platform_domain": "example.com",
-            "product_url": f"https://example.com/{i}",
-            "raw_title": f"标题{i}",
-            "spec_text": "默认规格",
-            "currency": "CNY",
-            "raw_price": 100 + i,
-            "normalized_price": 100 + i,
-            "price_unit": "件",
-            "confidence_score": 0.9,
-            "is_outlier": False,
-            "attempt_count": 1,
-            "source": "html_fetch",
-        }
-        for i in range(8)
-    ]
-
-    def stub_generate_json(self, prompt: str, fallback: dict[str, object]) -> LLMResult:
-        captured_prompt["prompt"] = prompt
-        return LLMResult(value=fallback, status="fallback", message="timeout")
-
-    monkeypatch.setattr("app.services.llm_client.LLMClient.generate_json", stub_generate_json)
-
-    reviewed_rows, _ = _llm_review_price_rows("调研宠物市场", rows)
-
-    assert reviewed_rows == rows
-    assert "产品0" in captured_prompt["prompt"]
-    assert "产品4" in captured_prompt["prompt"]
-    assert "产品5" not in captured_prompt["prompt"]
-
-
 def test_discover_platforms_uses_llm_selected_final_platforms(monkeypatch: pytest.MonkeyPatch) -> None:
     def stub_search_web(self, prompt: str, fallback: dict[str, object]) -> LLMResult:
         if "宠物烘干箱 标准款" in prompt:
@@ -171,6 +137,79 @@ def test_discover_platforms_uses_llm_selected_final_platforms(monkeypatch: pytes
     assert len(result["platforms"]) == 20
     assert result["product_platforms"][0]["platforms"][0]["platform_url"] == "https://a-platform1.com/item/1"
     assert result["product_platforms"][1]["platforms"][0]["platform_summary"] == "B简介1"
+
+
+def test_discover_platforms_runs_one_parallel_job_per_product(monkeypatch: pytest.MonkeyPatch) -> None:
+    submitted: list[str] = []
+
+    class FakeExecutor:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        def submit(self, fn, prompt, product, max_platforms):
+            submitted.append(str(product["product_name"]))
+            future: Future = Future()
+            future.set_result(
+                (
+                    [
+                        {
+                            "platform_name": f"{product['product_name']}平台",
+                            "platform_domain": f"{product['input_order']}.example.com",
+                            "platform_url": f"https://{product['input_order']}.example.com/item/1",
+                            "platform_summary": f"{product['product_name']}简介",
+                            "platform_type": "marketplace",
+                            "priority": 1,
+                            "reason": "有效",
+                            "source": "llm_web_search",
+                        }
+                    ],
+                    [],
+                    {"candidate_count": 1, "invalid_count": 0, "selected_count": 1, "final_count": 1},
+                )
+            )
+            return future
+
+    monkeypatch.setattr("app.workflows.research_workflow.ThreadPoolExecutor", FakeExecutor)
+    monkeypatch.setattr(
+        "app.workflows.research_workflow._llm_select_final_platforms_for_product",
+        lambda prompt, product, max_platforms: (
+            [
+                {
+                    "platform_name": f"{product['product_name']}平台",
+                    "platform_domain": f"{product['input_order']}.example.com",
+                    "platform_url": f"https://{product['input_order']}.example.com/item/1",
+                    "platform_summary": f"{product['product_name']}简介",
+                    "platform_type": "marketplace",
+                    "priority": 1,
+                    "reason": "有效",
+                    "source": "llm_web_search",
+                }
+            ],
+            [],
+            {"candidate_count": 1, "invalid_count": 0, "selected_count": 1, "final_count": 1},
+        ),
+    )
+
+    result = discover_platforms(
+        {
+            "prompt": "调研宠物烘干箱市场",
+            "products": [
+                {"product_name": "产品A", "source_type": "user_specified", "input_order": 1},
+                {"product_name": "产品B", "source_type": "user_specified", "input_order": 2},
+            ],
+        }
+    )
+
+    assert submitted == ["产品A", "产品B"]
+    assert [item["product_name"] for item in result["product_platforms"]] == ["产品A", "产品B"]
+    assert result["product_platforms"][0]["platforms"][0]["platform_domain"] == "1.example.com"
+    assert result["product_platforms"][1]["platforms"][0]["platform_domain"] == "2.example.com"
 
 
 def test_discover_platforms_retries_web_search_until_ten_real_platforms(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -319,11 +358,6 @@ def test_crawl_prices_parallel_uses_product_specific_platform_groups(monkeypatch
 
     monkeypatch.setattr("app.services.crawl_service.PriceCrawlerService.crawl_product_prices", stub_crawl_product_prices)
     monkeypatch.setattr("app.workflows.research_workflow.ThreadPoolExecutor", FakeExecutor)
-    monkeypatch.setattr(
-        "app.workflows.research_workflow._llm_review_price_rows",
-        lambda prompt, rows: (rows, []),
-    )
-
     result = crawl_prices_parallel(
         {
             "prompt": "调研测试市场",
@@ -348,6 +382,7 @@ def test_crawl_prices_parallel_uses_product_specific_platform_groups(monkeypatch
     assert captured["product"]["product_name"] in {"产品A", "产品B"}
     assert captured["platforms"][0]["platform_domain"] in {"a1.com", "b1.com"}
     assert result["price_records"][0]["platform_domain"] == "a1.com"
+    assert not any(stage["stage_name"] == "llm_review_price_rows" for stage in result["stages"])
 
 
 def test_crawl_prices_parallel_runs_one_parallel_job_per_product(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -390,11 +425,6 @@ def test_crawl_prices_parallel_runs_one_parallel_job_per_product(monkeypatch: py
             return future
 
     monkeypatch.setattr("app.workflows.research_workflow.ThreadPoolExecutor", FakeExecutor)
-    monkeypatch.setattr(
-        "app.workflows.research_workflow._llm_review_price_rows",
-        lambda prompt, rows: (rows, []),
-    )
-
     result = crawl_prices_parallel(
         {
             "prompt": "调研测试市场",
@@ -422,6 +452,97 @@ def test_crawl_prices_parallel_runs_one_parallel_job_per_product(monkeypatch: py
     assert submitted[0][1][0]["platform_domain"] == "a1.com"
     assert submitted[1][1][0]["platform_domain"] == "b1.com"
     assert len(result["price_records"]) == 2
+    assert result["stages"][-1]["status"] == "failed"
+    assert not any(stage["stage_name"] == "llm_review_price_rows" for stage in result["stages"])
+
+
+def test_crawl_prices_parallel_marks_failed_when_no_valid_prices(monkeypatch: pytest.MonkeyPatch) -> None:
+    def stub_crawl_prices(self, products, platforms, max_rounds=3, product_platforms=None):
+        return [
+            {
+                "product_name": "产品A",
+                "platform_name": "平台A1",
+                "platform_domain": "a1.com",
+                "product_url": "https://a1.com/item/1",
+                "raw_title": "产品A",
+                "spec_text": "",
+                "currency": "CNY",
+                "raw_price": None,
+                "normalized_price": None,
+                "price_unit": None,
+                "confidence_score": 0.0,
+                "is_outlier": False,
+                "attempt_count": 1,
+                "source": "playwright_fetch_failed",
+                "notes": "browser timeout",
+            }
+        ]
+
+    monkeypatch.setattr("app.services.crawl_service.PriceCrawlerService.crawl_prices", stub_crawl_prices)
+    result = crawl_prices_parallel(
+        {
+            "prompt": "调研测试市场",
+            "products": [{"product_name": "产品A", "source_type": "user_specified", "input_order": 1}],
+            "platforms": [{"platform_name": "平台A1", "platform_domain": "a1.com", "platform_url": "https://a1.com/item/1"}],
+        }
+    )
+
+    assert result["stages"][-1]["stage_name"] == "crawl_prices_parallel"
+    assert result["stages"][-1]["status"] == "failed"
+    assert "未识别出任何有效价格" in result["stages"][-1]["message"]
+    assert not any(stage["stage_name"] == "llm_review_price_rows" for stage in result["stages"])
+
+
+def test_crawl_prices_parallel_marks_completed_when_some_valid_prices_exist(monkeypatch: pytest.MonkeyPatch) -> None:
+    def stub_crawl_prices(self, products, platforms, max_rounds=3, product_platforms=None):
+        return [
+            {
+                "product_name": "产品A",
+                "platform_name": "平台A1",
+                "platform_domain": "a1.com",
+                "product_url": "https://a1.com/item/1",
+                "raw_title": "产品A",
+                "spec_text": "",
+                "currency": "CNY",
+                "raw_price": 99,
+                "normalized_price": 99,
+                "price_unit": "件",
+                "confidence_score": 0.9,
+                "is_outlier": False,
+                "attempt_count": 1,
+                "source": "markdown_llm_price",
+            },
+            {
+                "product_name": "产品A",
+                "platform_name": "平台A2",
+                "platform_domain": "a2.com",
+                "product_url": "https://a2.com/item/2",
+                "raw_title": "产品A",
+                "spec_text": "",
+                "currency": "CNY",
+                "raw_price": None,
+                "normalized_price": None,
+                "price_unit": None,
+                "confidence_score": 0.0,
+                "is_outlier": False,
+                "attempt_count": 1,
+                "source": "playwright_fetch_failed",
+                "notes": "browser timeout",
+            },
+        ]
+
+    monkeypatch.setattr("app.services.crawl_service.PriceCrawlerService.crawl_prices", stub_crawl_prices)
+    result = crawl_prices_parallel(
+        {
+            "prompt": "调研测试市场",
+            "products": [{"product_name": "产品A", "source_type": "user_specified", "input_order": 1}],
+            "platforms": [{"platform_name": "平台A1", "platform_domain": "a1.com", "platform_url": "https://a1.com/item/1"}],
+        }
+    )
+
+    assert result["stages"][-1]["status"] == "completed"
+    assert "其中 1 条识别出有效价格" in result["stages"][-1]["message"]
+    assert not any(stage["stage_name"] == "llm_review_price_rows" for stage in result["stages"])
 
 
 def test_discover_platforms_writes_workflow_logs(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
@@ -525,11 +646,6 @@ def test_crawl_prices_parallel_prefers_product_target_urls(monkeypatch: pytest.M
         ]
 
     monkeypatch.setattr("app.services.crawl_service.PriceCrawlerService.crawl_prices", stub_crawl_prices)
-    monkeypatch.setattr(
-        "app.workflows.research_workflow._llm_review_price_rows",
-        lambda prompt, rows: (rows, []),
-    )
-
     state = {
         "prompt": "调研宠物烘干箱市场",
         "products": [{"product_name": "宠物烘干箱", "source_type": "category_inferred", "input_order": 1}],
@@ -551,3 +667,191 @@ def test_crawl_prices_parallel_prefers_product_target_urls(monkeypatch: pytest.M
     assert captured["platforms"] == state["platforms"]
     assert captured["product_platforms"] is None
     assert result["price_records"][0]["product_url"] == "https://item.jd.com/1001.html"
+    assert not any(stage["stage_name"] == "llm_review_price_rows" for stage in result["stages"])
+
+
+def test_normalize_prices_reports_filter_and_dedup_stats() -> None:
+    result = normalize_prices(
+        {
+            "prompt": "调研电动牙刷市场",
+            "price_records": [
+                {
+                    "product_name": "电动牙刷",
+                    "platform_name": "京东",
+                    "platform_domain": "jd.com",
+                    "product_url": "https://jd.com/item/1",
+                    "raw_title": "电动牙刷A",
+                    "spec_text": "默认规格",
+                    "currency": "cny",
+                    "raw_price": "199",
+                    "normalized_price": None,
+                    "price_unit": "个",
+                    "confidence_score": "0.70",
+                    "is_outlier": False,
+                    "attempt_count": "2",
+                    "source": "markdown_llm_price",
+                },
+                {
+                    "product_name": "电动牙刷",
+                    "platform_name": "京东",
+                    "platform_domain": "jd.com",
+                    "product_url": "https://jd.com/item/1",
+                    "raw_title": "电动牙刷A-重复",
+                    "spec_text": "默认规格",
+                    "currency": "CNY",
+                    "raw_price": "199",
+                    "normalized_price": "199",
+                    "price_unit": "件",
+                    "confidence_score": "0.95",
+                    "is_outlier": False,
+                    "attempt_count": 1,
+                    "source": "markdown_llm_price",
+                },
+                {
+                    "product_name": "电动牙刷",
+                    "platform_name": "淘宝",
+                    "platform_domain": "taobao.com",
+                    "product_url": "https://taobao.com/item/2",
+                    "raw_title": "电动牙刷B",
+                    "spec_text": "默认规格",
+                    "currency": "CNY",
+                    "raw_price": None,
+                    "normalized_price": None,
+                    "price_unit": None,
+                    "confidence_score": 0.1,
+                    "is_outlier": False,
+                    "attempt_count": 1,
+                    "source": "markdown_llm_unpriced",
+                },
+            ],
+        }
+    )
+
+    assert len(result["price_records"]) == 1
+    assert result["price_records"][0]["price_unit"] == "件"
+    assert result["stages"][-1]["stage_name"] == "normalize_prices"
+    assert "删除 1 条空价格记录" in result["stages"][-1]["message"]
+    assert "去重 1 条" in result["stages"][-1]["message"]
+    assert result["stages"][-1]["detail_json"]["stats"]["final_count"] == 1
+
+
+def test_analyze_prices_ignores_legacy_fallback_seed_warnings(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "app.services.llm_client.LLMClient.generate_json",
+        lambda self, prompt, fallback: LLMResult(value=fallback, status="success"),
+    )
+
+    result = analyze_prices(
+        {
+            "prompt": "调研电动牙刷市场",
+            "platforms": [
+                {
+                    "platform_name": "旧平台",
+                    "platform_domain": "old.example.com",
+                    "source": "fallback_seed",
+                }
+            ],
+            "price_records": [
+                {
+                    "product_name": "电动牙刷",
+                    "platform_name": "旧平台",
+                    "platform_domain": "old.example.com",
+                    "product_url": "https://old.example.com/item/1",
+                    "normalized_price": 199.0,
+                    "attempt_count": 1,
+                    "source": "default_seed",
+                }
+            ],
+        }
+    )
+
+    warnings = result["price_report"]["warnings"]
+    assert "部分平台使用 fallback 数据" not in warnings
+    assert "部分价格来自默认种子数据" not in warnings
+
+
+def test_build_from_zero_plan_does_not_emit_legacy_fallback_data_quality(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "app.services.llm_client.LLMClient.generate_structured_text",
+        lambda self, prompt, fallback: LLMResult(value="构建方案", status="success"),
+    )
+
+    result = build_from_zero_plan(
+        {
+            "topic": "调研电动牙刷市场",
+            "platforms": [
+                {
+                    "platform_name": "旧平台",
+                    "platform_domain": "old.example.com",
+                    "source": "fallback_seed",
+                }
+            ],
+            "market_analysis": {
+                "summary_json": {},
+            },
+        }
+    )
+
+    assert result["market_analysis"]["summary_json"] == {}
+
+
+def test_analyze_prices_builds_chart_datasets_and_preserves_row_urls(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "app.services.llm_client.LLMClient.generate_json",
+        lambda self, prompt, fallback: LLMResult(value=fallback, status="success"),
+    )
+
+    result = analyze_prices(
+        {
+            "prompt": "调研电动牙刷市场",
+            "platforms": [
+                {"platform_name": "京东", "platform_domain": "jd.com", "source": "llm_web_search"},
+                {"platform_name": "淘宝", "platform_domain": "taobao.com", "source": "llm_web_search"},
+            ],
+            "price_records": [
+                {
+                    "product_name": "电动牙刷 标准款",
+                    "platform_name": "京东",
+                    "platform_domain": "jd.com",
+                    "product_url": "https://jd.com/item/1",
+                    "normalized_price": 199.0,
+                    "attempt_count": 1,
+                    "source": "markdown_llm_price",
+                    "notes": "",
+                },
+                {
+                    "product_name": "电动牙刷 标准款",
+                    "platform_name": "淘宝",
+                    "platform_domain": "taobao.com",
+                    "product_url": "https://taobao.com/item/2",
+                    "normalized_price": 189.0,
+                    "attempt_count": 1,
+                    "source": "markdown_llm_price",
+                    "notes": "",
+                },
+                {
+                    "product_name": "电动牙刷 Pro",
+                    "platform_name": "京东",
+                    "platform_domain": "jd.com",
+                    "product_url": "https://jd.com/item/3",
+                    "normalized_price": None,
+                    "attempt_count": 1,
+                    "source": "markdown_llm_unpriced",
+                    "notes": "抓到网页但未识别出价格",
+                },
+            ],
+        }
+    )
+
+    report = result["price_report"]
+    assert {row["product_url"] for row in report["rows"]} == {
+        "https://jd.com/item/1",
+        "https://taobao.com/item/2",
+        "https://jd.com/item/3",
+    }
+    assert report["sample_size"] == 2
+    assert report["row_count"] == 3
+    assert report["charts"]["product_platform_prices"]["products"] == ["电动牙刷 Pro", "电动牙刷 标准款"]
+    assert report["charts"]["platform_average_prices"][0]["platform_name"] == "京东"
+    assert report["charts"]["coverage_matrix"]["cells"][0]["product_name"]
+    assert report["charts"]["source_breakdown"][0]["source"] in {"markdown_llm_price", "markdown_llm_unpriced"}

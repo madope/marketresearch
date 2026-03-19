@@ -41,6 +41,7 @@ LLM_PROVIDER=volcengine
 ARK_API_KEY=...
 ARK_BASE_URL=https://ark.cn-beijing.volces.com/api/v3
 ARK_MODEL=<your-ark-endpoint-id>
+REQUEST_TIMEOUT_SECONDS=300
 ```
 
 ### 2. 前端
@@ -84,7 +85,7 @@ npm test
 - 科技风 Dashboard 界面
 - 双 provider LLM 客户端封装（Kimi / 火山方舟）与本地 fallback
 - `discover_platforms` 通过 Volcengine `web_search` 联网搜索平台名称、域名、简介和真实价格页 URL
-- `discover_platforms` 对每一种商品分别执行最多 3 轮搜索，目标为该商品收集至少 10 个真实平台结果；不足时只返回真实搜到的数据，不补假数据
+- `discover_platforms` 为每一种商品创建一个并行搜索任务，每个商品内部最多执行 3 轮搜索，目标为该商品收集至少 10 个真实平台结果；不足时只返回真实搜到的数据，不补假数据
 - `crawl_prices_parallel` 为每种商品创建一个并行抓取任务，每个任务只访问该商品自己的平台价格页 URL
 - 价格抓取链路为 `Playwright 抓网页 -> HTML 转 Markdown -> LLM 抽取价格`，输出保留每个平台的 `product_url`
 - 如果网页抓取失败，或网页已抓到但 LLM 未识别出价格，仍保留该平台记录，价格为空，并写明失败原因

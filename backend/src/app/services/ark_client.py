@@ -24,6 +24,7 @@ class VolcengineArkClient:
                 api_key=settings.ark_api_key,
                 base_url=settings.ark_base_url,
                 timeout=self.timeout,
+                max_retries=0,
             )
 
     def generate_structured_text(self, prompt: str, fallback: str) -> LLMResult[str]:

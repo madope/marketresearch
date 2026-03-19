@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 import re
+from collections.abc import Callable
 from typing import Any
 
-import httpx
 from bs4 import BeautifulSoup
 
 from app.services.llm_client import LLMClient
@@ -12,21 +11,15 @@ from app.services.page_fetch_service import PageFetchService
 
 
 PriceRow = dict[str, Any]
-PriceProvider = Callable[[dict[str, object], dict[str, object], int], PriceRow | None]
-HtmlFetcher = Callable[[dict[str, object], dict[str, object], int], str | None]
 MarkdownPriceExtractor = Callable[[dict[str, object], dict[str, object], str, str], PriceRow | None]
 
 
 class PriceCrawlerService:
     def __init__(
         self,
-        price_provider: PriceProvider | None = None,
-        html_fetcher: HtmlFetcher | None = None,
         page_fetch_service: PageFetchService | None = None,
         markdown_price_extractor: MarkdownPriceExtractor | None = None,
     ) -> None:
-        self.price_provider = price_provider or self._default_price_provider
-        self.html_fetcher = html_fetcher or self._default_html_fetcher
         self.page_fetch_service = page_fetch_service or PageFetchService()
         self.markdown_price_extractor = markdown_price_extractor or self._extract_price_from_markdown
 
@@ -104,50 +97,6 @@ class PriceCrawlerService:
             extracted.setdefault("markdown_excerpt", str(page_result["markdown"])[:1000])
             records.append(extracted)
         return records
-
-    def _default_price_provider(
-        self,
-        product: dict[str, object],
-        platform: dict[str, object],
-        _round_number: int,
-    ) -> PriceRow:
-        base_price = 99.0 + float(int(product["input_order"])) * 30
-        return {
-            "product_name": str(product["product_name"]),
-            "platform_name": str(platform["platform_name"]),
-            "platform_domain": str(platform["platform_domain"]),
-            "product_url": str(
-                product.get("product_url", f"https://{platform['platform_domain']}/search/{product['input_order']}")
-            ),
-            "raw_title": f"{product['product_name']} - {platform['platform_name']}",
-            "spec_text": "默认规格",
-            "currency": "CNY",
-            "raw_price": base_price,
-            "normalized_price": base_price,
-            "price_unit": "件",
-            "confidence_score": 0.72,
-            "is_outlier": False,
-            "attempt_count": _round_number,
-            "source": "default_seed",
-        }
-
-    def _default_html_fetcher(
-        self,
-        product: dict[str, object],
-        platform: dict[str, object],
-        _round_number: int,
-    ) -> str | None:
-        product_url = str(product.get("product_url", f"https://{platform['platform_domain']}/search/{product['input_order']}"))
-        try:
-            response = httpx.get(
-                product_url,
-                headers={"User-Agent": "Mozilla/5.0 MarketResearchBot/0.1"},
-                timeout=10.0,
-            )
-            response.raise_for_status()
-            return response.text
-        except httpx.HTTPError:
-            return None
 
     def _extract_price_from_markdown(
         self,

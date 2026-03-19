@@ -2,6 +2,7 @@
 
 1. 为 `discover_platforms` 增加按商品搜索的平台发现逻辑
    - 单商品独立搜索
+   - 商品级任务并行执行
    - 3 轮内尽量收集 10 个真实平台
    - 输出 `product_platforms` 和汇总 `platforms`
 

@@ -1,6 +1,7 @@
 .DS_Store
 .env
 *.log
+.superpowers/
 
 backend/.env
 backend/.venv/
@@ -17,7 +18,10 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
+*.tsbuildinfo
 .pytest_cache/
 
 dist/
 build/
+frontend/vite.config.js
+frontend/vite.config.d.ts

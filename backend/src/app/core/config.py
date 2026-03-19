@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     ark_api_key: str | None = None
     ark_base_url: str = "https://ark.cn-beijing.volces.com/api/v3"
     ark_model: str = ""
-    request_timeout_seconds: int = 30
+    request_timeout_seconds: int = 300
 
     model_config = SettingsConfigDict(
         env_file=".env",

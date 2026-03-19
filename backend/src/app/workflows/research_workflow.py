@@ -74,6 +74,24 @@ def _completed_stage(
     }
 
 
+def _stage(
+    *,
+    workflow_name: str,
+    stage_name: str,
+    status: str,
+    message: str,
+    detail_json: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "workflow_name": workflow_name,
+        "stage_name": stage_name,
+        "status": status,
+        "message": message,
+        "detail_json": detail_json,
+        "retry_count": 0,
+    }
+
+
 class ResearchWorkflowState(TypedDict, total=False):
     prompt: str
     topic: str
@@ -314,55 +332,6 @@ def _llm_select_final_platforms_for_product(
     return list(deduped.values())[:max_platforms], stage_updates, metrics
 
 
-def _llm_review_price_rows(prompt: str, rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    client = LLMClient()
-    preview_rows = rows[: min(5, len(rows))]
-    fallback_payload = {"rows": preview_rows}
-    result = client.generate_json(
-        f"""
-你是市场调研工作流的价格抓取校验节点。
-用户输入: {prompt}
-价格候选数据: {preview_rows}
-
-任务:
-校验这些价格记录是否合理，必要时修正 title/spec/price_unit 字段。
-如果无法判断，保留原值。
-
-返回 JSON:
-{{
-  "rows": [
-    {{
-      "product_name": "string",
-      "platform_name": "string",
-      "platform_domain": "string",
-      "product_url": "string",
-      "raw_title": "string",
-      "spec_text": "string",
-      "currency": "CNY",
-      "raw_price": 123.45,
-      "normalized_price": 123.45,
-      "price_unit": "件",
-      "confidence_score": 0.9,
-      "is_outlier": false,
-      "attempt_count": 1,
-      "source": "html_fetch"
-    }}
-  ]
-}}
-""",
-        fallback=fallback_payload,
-    )
-    payload = result.value
-    reviewed_rows = payload.get("rows", preview_rows)
-    if len(rows) > len(preview_rows):
-        reviewed_rows = reviewed_rows + rows[len(preview_rows) :]
-    return reviewed_rows, _llm_stage(
-        workflow_name="price_research",
-        stage_name="llm_review_price_rows",
-        result=result,
-    )
-
-
 def _llm_normalize_rows(prompt: str, rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     client = LLMClient()
     preview_rows = rows[: min(10, len(rows))]
@@ -453,13 +422,34 @@ def discover_platforms(state: ResearchWorkflowState) -> ResearchWorkflowState:
     all_platforms: list[dict[str, Any]] = []
     total_candidate_count = 0
     total_invalid_count = 0
+    max_workers = max(1, len(state["products"]))
+    ordered_results: list[tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]], dict[str, int]] | None] = [
+        None for _ in state["products"]
+    ]
 
-    for product in state["products"]:
-        platforms, product_llm_stages, metrics = _llm_select_final_platforms_for_product(
-            state["prompt"],
-            product,
-            max_platforms=10,
-        )
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [
+            (
+                index,
+                product,
+                executor.submit(
+                    _llm_select_final_platforms_for_product,
+                    state["prompt"],
+                    product,
+                    10,
+                ),
+            )
+            for index, product in enumerate(state["products"])
+        ]
+
+        for index, product, future in futures:
+            platforms, product_llm_stages, metrics = future.result()
+            ordered_results[index] = (product, platforms, product_llm_stages, metrics)
+
+    for result in ordered_results:
+        if result is None:
+            continue
+        product, platforms, product_llm_stages, metrics = result
         llm_stages.extend(product_llm_stages)
         product_platforms.append(
             {
@@ -536,19 +526,24 @@ def crawl_prices_parallel(state: ResearchWorkflowState) -> ResearchWorkflowState
             platforms=state["platforms"],
             max_rounds=3,
         )
-    price_records, llm_stages = _llm_review_price_rows(state["prompt"], raw_price_records)
+    price_records = raw_price_records
     source_breakdown = dict(Counter(str(row.get("source", "unknown")) for row in price_records))
+    valid_price_count = sum(1 for row in price_records if row.get("normalized_price") is not None)
+    stage_status = "completed" if valid_price_count > 0 else "failed"
+    stage_message = (
+        f"已抓取 {len(price_records)} 条价格记录，覆盖 {len(product_platforms) or len(state['products'])} 个商品任务，"
+        f"其中 {valid_price_count} 条识别出有效价格，来源分布：{source_breakdown}"
+        if valid_price_count > 0
+        else f"已抓取 {len(price_records)} 条价格记录，覆盖 {len(product_platforms) or len(state['products'])} 个商品任务，但未识别出任何有效价格，来源分布：{source_breakdown}"
+    )
     return {
         "price_records": price_records,
-        "stages": llm_stages + [
-            _completed_stage(
+        "stages": [
+            _stage(
                 workflow_name="price_research",
                 stage_name="crawl_prices_parallel",
-                message=(
-                    f"已抓取 {len(price_records)} 条价格记录，"
-                    f"覆盖 {len(product_platforms) or len(state['products'])} 个商品任务，"
-                    f"来源分布：{source_breakdown}"
-                ),
+                status=stage_status,
+                message=stage_message,
                 detail_json={
                     "prompt": state["prompt"],
                     "products": state["products"],
@@ -557,6 +552,7 @@ def crawl_prices_parallel(state: ResearchWorkflowState) -> ResearchWorkflowState
                     "price_records": price_records,
                     "parallel_task_count": len(product_platforms) or len(state["products"]),
                     "source_breakdown": source_breakdown,
+                    "valid_price_count": valid_price_count,
                 },
             )
         ],
@@ -565,27 +561,157 @@ def crawl_prices_parallel(state: ResearchWorkflowState) -> ResearchWorkflowState
 
 def normalize_prices(state: ResearchWorkflowState) -> ResearchWorkflowState:
     llm_normalized_records, llm_stages = _llm_normalize_rows(state["prompt"], state["price_records"])
-    normalized_records = normalize_price_records(llm_normalized_records)
+    normalized_records, normalization_stats = normalize_price_records(llm_normalized_records)
     product_count = len({row["product_name"] for row in normalized_records})
+    message_parts = [f"已标准化 {len(normalized_records)} 条记录，覆盖 {product_count} 个产品"]
+    if normalization_stats["removed_missing_price_count"] > 0:
+        message_parts.append(f"删除 {normalization_stats['removed_missing_price_count']} 条空价格记录")
+    if normalization_stats["removed_invalid_format_count"] > 0:
+        message_parts.append(f"删除 {normalization_stats['removed_invalid_format_count']} 条格式错误记录")
+    if normalization_stats["removed_duplicate_count"] > 0:
+        message_parts.append(f"去重 {normalization_stats['removed_duplicate_count']} 条")
     return {
         "price_records": normalized_records,
         "stages": llm_stages + [
             _completed_stage(
                 workflow_name="price_research",
                 stage_name="normalize_prices",
-                message=f"已标准化 {len(normalized_records)} 条记录，覆盖 {product_count} 个产品",
+                message="，".join(message_parts),
                 detail_json={
                     "prompt": state["prompt"],
                     "price_records": normalized_records,
                     "product_count": product_count,
+                    "stats": normalization_stats,
                 },
             )
         ]
     }
 
 
+def _safe_price(value: Any) -> float | None:
+    try:
+        if value is None:
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _build_price_chart_payload(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    valid_rows = [row for row in rows if _safe_price(row.get("normalized_price")) is not None]
+    products = sorted({str(row.get("product_name", "")) for row in rows if str(row.get("product_name", "")).strip()})
+    platforms = sorted({str(row.get("platform_name", "")) for row in rows if str(row.get("platform_name", "")).strip()})
+
+    row_lookup: dict[tuple[str, str], float | None] = {}
+    for row in rows:
+        product_name = str(row.get("product_name", ""))
+        platform_name = str(row.get("platform_name", ""))
+        price = _safe_price(row.get("normalized_price"))
+        if product_name and platform_name:
+            row_lookup[(product_name, platform_name)] = price
+
+    product_platform_prices = {
+        "products": products,
+        "series": [
+            {
+                "platform_name": platform_name,
+                "values": [row_lookup.get((product_name, platform_name)) for product_name in products],
+            }
+            for platform_name in platforms
+        ],
+    }
+
+    platform_average_prices = []
+    for platform_name in platforms:
+        platform_values = [
+            _safe_price(row.get("normalized_price"))
+            for row in valid_rows
+            if str(row.get("platform_name", "")) == platform_name
+        ]
+        platform_values = [value for value in platform_values if value is not None]
+        if not platform_values:
+            continue
+        platform_average_prices.append(
+            {
+                "platform_name": platform_name,
+                "average_price": round(mean(platform_values), 2),
+                "sample_size": len(platform_values),
+            }
+        )
+
+    coverage_cells = []
+    for product_name in products:
+        for platform_name in platforms:
+            matching_row = next(
+                (
+                    row
+                    for row in rows
+                    if str(row.get("product_name", "")) == product_name and str(row.get("platform_name", "")) == platform_name
+                ),
+                None,
+            )
+            coverage_cells.append(
+                {
+                    "product_name": product_name,
+                    "platform_name": platform_name,
+                    "has_price": _safe_price(matching_row.get("normalized_price")) is not None if matching_row else False,
+                    "price": _safe_price(matching_row.get("normalized_price")) if matching_row else None,
+                    "product_url": str(matching_row.get("product_url", "")) if matching_row else "",
+                }
+            )
+
+    source_breakdown = Counter(str(row.get("source", "unknown")) for row in rows)
+    product_price_ranges = []
+    for product_name in products:
+        product_values = [
+            _safe_price(row.get("normalized_price"))
+            for row in valid_rows
+            if str(row.get("product_name", "")) == product_name
+        ]
+        product_values = [value for value in product_values if value is not None]
+        if not product_values:
+            continue
+        product_price_ranges.append(
+            {
+                "product_name": product_name,
+                "min_price": min(product_values),
+                "max_price": max(product_values),
+                "average_price": round(mean(product_values), 2),
+                "sample_size": len(product_values),
+            }
+        )
+
+    return {
+        "product_platform_prices": product_platform_prices,
+        "platform_average_prices": platform_average_prices,
+        "coverage_matrix": {
+            "products": products,
+            "platforms": platforms,
+            "cells": coverage_cells,
+        },
+        "source_breakdown": [
+            {
+                "source": source,
+                "count": count,
+            }
+            for source, count in source_breakdown.items()
+        ],
+        "product_price_ranges": product_price_ranges,
+    }
+
+
 def analyze_prices(state: ResearchWorkflowState) -> ResearchWorkflowState:
-    prices = [record["normalized_price"] for record in state["price_records"]]
+    rows = sorted(
+        list(state["price_records"]),
+        key=lambda row: (
+            str(row.get("product_name", "")),
+            str(row.get("platform_name", "")),
+            str(row.get("product_url", "")),
+        ),
+    )
+    valid_rows = [row for row in rows if _safe_price(row.get("normalized_price")) is not None]
+    prices = [_safe_price(record.get("normalized_price")) for record in valid_rows]
+    prices = [price for price in prices if price is not None]
     source_breakdown = Counter(record.get("source", "unknown") for record in state["price_records"])
     platform_sources = Counter(platform.get("source", "unknown") for platform in state["platforms"])
     warnings: list[str] = []
@@ -593,14 +719,12 @@ def analyze_prices(state: ResearchWorkflowState) -> ResearchWorkflowState:
     highest_price = max(prices) if prices else 0
     lowest_price = min(prices) if prices else 0
 
-    if platform_sources.get("fallback_seed", 0) > 0:
-        warnings.append("部分平台使用 fallback 数据")
     if not state["platforms"]:
         warnings.append("未搜索到足够的真实平台结果")
-    if not state["price_records"]:
+    if not valid_rows:
         warnings.append("未抓取到可用价格记录")
-    if source_breakdown.get("default_seed", 0) > 0:
-        warnings.append("部分价格来自默认种子数据")
+    elif len(valid_rows) < len(rows):
+        warnings.append("部分平台页面未识别出有效价格")
     if any(int(record.get("attempt_count", 1)) > 1 for record in state["price_records"]):
         warnings.append("部分价格记录经过重试后获取")
 
@@ -612,7 +736,8 @@ def analyze_prices(state: ResearchWorkflowState) -> ResearchWorkflowState:
 用户输入: {state['prompt']}
 统计结果:
 - 样本量: {len(state['price_records'])}
-- 平台数: {len(state['platforms'])}
+ - 有效价格样本量: {len(valid_rows)}
+ - 平台数: {len(state['platforms'])}
 - 均价: {average_price}
 - 最高价: {highest_price}
 - 最低价: {lowest_price}
@@ -633,7 +758,8 @@ def analyze_prices(state: ResearchWorkflowState) -> ResearchWorkflowState:
 
     price_report = {
         "currency": "CNY",
-        "sample_size": len(state["price_records"]),
+        "sample_size": len(valid_rows),
+        "row_count": len(rows),
         "platform_count": len(state["platforms"]),
         "average_price": average_price,
         "highest_price": highest_price,
@@ -642,7 +768,8 @@ def analyze_prices(state: ResearchWorkflowState) -> ResearchWorkflowState:
         "warnings": final_warnings,
         "source_breakdown": dict(source_breakdown),
         "platform_source_breakdown": dict(platform_sources),
-        "rows": state["price_records"],
+        "charts": _build_price_chart_payload(rows),
+        "rows": rows,
     }
     return {
         "price_report": price_report,
@@ -756,8 +883,6 @@ def build_from_zero_plan(state: ResearchWorkflowState) -> ResearchWorkflowState:
     market_analysis = dict(state.get("market_analysis", {}))
     market_analysis["build_plan_text"] = result.value
     summary_json = dict(market_analysis.get("summary_json", {}))
-    if any(platform.get("source") == "fallback_seed" for platform in state.get("platforms", [])):
-        summary_json["data_quality"] = ["部分平台为 fallback 结果，需人工复核"]
     market_analysis["summary_json"] = summary_json
     return {
         "market_analysis": market_analysis,
