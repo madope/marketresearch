@@ -167,3 +167,62 @@ def test_cancel_all_tasks_marks_queued_and_running_tasks_as_cancelled(client: Te
         assert stored_running_task.status == "cancelled"
     finally:
         verify_db.close()
+
+
+def test_research_intake_chat_returns_structured_requirement_and_follow_up(client: TestClient) -> None:
+    response = client.post(
+        "/api/research-intake/chat",
+        json={
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "我想调研中国大陆宠物烘干箱市场，重点看价格和平台",
+                }
+            ],
+            "draft_requirement": {
+                "market_topic": "",
+                "target_region": "",
+                "products": [],
+                "goals": [],
+                "constraints": {},
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["draft_requirement"]["target_region"] == "中国大陆"
+    assert "宠物烘干箱" in payload["draft_requirement"]["products"]
+    assert "价格调研" in payload["draft_requirement"]["goals"]
+    assert "平台分布" in payload["draft_requirement"]["goals"]
+    assert payload["ready_to_start"] is True
+    assert "请点击下方按钮开始调研" in payload["assistant_message"]
+    assert "调研中国大陆宠物烘干箱市场" in payload["final_prompt"]
+
+
+def test_research_intake_chat_asks_follow_up_when_core_fields_are_missing(client: TestClient) -> None:
+    response = client.post(
+        "/api/research-intake/chat",
+        json={
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "我想调研宠物市场",
+                }
+            ],
+            "draft_requirement": {
+                "market_topic": "",
+                "target_region": "",
+                "products": [],
+                "goals": [],
+                "constraints": {},
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ready_to_start"] is False
+    assert "target_region" in payload["missing_fields"]
+    assert "products" in payload["missing_fields"]
+    assert payload["assistant_message"]

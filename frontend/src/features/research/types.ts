@@ -6,6 +6,27 @@ export interface ResearchTaskSummary {
   created_at: string;
 }
 
+export interface IntakeMessage {
+  role: string;
+  content: string;
+}
+
+export interface ResearchRequirementDraft {
+  market_topic: string;
+  target_region: string;
+  products: string[];
+  goals: string[];
+  constraints: Record<string, unknown>;
+}
+
+export interface ResearchIntakeChatResponse {
+  assistant_message: string;
+  draft_requirement: ResearchRequirementDraft;
+  missing_fields: string[];
+  ready_to_start: boolean;
+  final_prompt: string;
+}
+
 export interface ResearchProduct {
   product_name: string;
   source_type: string;
@@ -38,6 +59,7 @@ export interface PriceReportRow {
   product_url?: string | null;
   normalized_price: number | null;
   currency: string;
+  price_unit?: string | null;
   source?: string;
   notes?: string;
   attempt_count?: number;

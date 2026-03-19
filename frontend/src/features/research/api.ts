@@ -1,6 +1,13 @@
-import type { ResearchTaskDetail, ResearchTaskSummary, StageStatus } from "./types";
+import type {
+  IntakeMessage,
+  ResearchIntakeChatResponse,
+  ResearchRequirementDraft,
+  ResearchTaskDetail,
+  ResearchTaskSummary,
+  StageStatus,
+} from "./types";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000/api";
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000/api";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
@@ -43,4 +50,14 @@ export async function fetchResearchTaskStatus(
   taskId: string,
 ): Promise<{ task_id: string; status: string; stages: StageStatus[] }> {
   return request(`/research-tasks/${taskId}/status`);
+}
+
+export async function chatResearchIntake(payload: {
+  messages: IntakeMessage[];
+  draft_requirement: ResearchRequirementDraft;
+}): Promise<ResearchIntakeChatResponse> {
+  return request("/research-intake/chat", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }

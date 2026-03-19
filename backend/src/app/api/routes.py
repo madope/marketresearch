@@ -9,6 +9,8 @@ from app.schemas.research import (
     CancelResearchTasksResponse,
     CreateResearchTaskRequest,
     CreateResearchTaskResponse,
+    ResearchIntakeChatRequest,
+    ResearchIntakeChatResponse,
     PlatformResponse,
     ProductResponse,
     ResearchTaskDetailResponse,
@@ -16,6 +18,7 @@ from app.schemas.research import (
     StageStatusResponse,
     TaskSummaryResponse,
 )
+from app.services.research_intake_service import chat_research_intake
 from app.services.research_service import cancel_all_tasks, create_task, get_task, list_tasks, run_task
 
 router = APIRouter()
@@ -57,6 +60,12 @@ def create_research_task(
     task = create_task(db, payload.prompt)
     background_tasks.add_task(task_executor, task.id)
     return CreateResearchTaskResponse(task_id=task.id, status="queued")
+
+
+@router.post("/research-intake/chat", response_model=ResearchIntakeChatResponse)
+def chat_research_intake_endpoint(payload: ResearchIntakeChatRequest) -> ResearchIntakeChatResponse:
+    result = chat_research_intake(payload.messages, payload.draft_requirement)
+    return ResearchIntakeChatResponse(**result)
 
 
 @router.post("/research-tasks/cancel-all", response_model=CancelResearchTasksResponse)

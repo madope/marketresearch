@@ -1,7 +1,12 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { PriceChartsPanel } from "./price_charts";
-import type { ResearchTaskDetail, ResearchTaskSummary, StageStatus } from "./types";
+import type {
+  IntakeMessage,
+  ResearchTaskDetail,
+  ResearchTaskSummary,
+  StageStatus,
+} from "./types";
 
 import "./dashboard.css";
 
@@ -9,10 +14,15 @@ interface DashboardProps {
   tasks: ResearchTaskSummary[];
   selectedTask: ResearchTaskDetail | null;
   isSubmitting: boolean;
+  isChatting: boolean;
   isCancelling: boolean;
   isPolling: boolean;
   canCancel: boolean;
-  onSubmit: (prompt: string) => void;
+  taskListError: string | null;
+  intakeMessages: IntakeMessage[];
+  intakeReadyToStart: boolean;
+  onSendIntakeMessage: (message: string) => void | Promise<void>;
+  onStartResearch: () => void;
   onCancelAllTasks: () => void;
   onSelectTask: (taskId: string) => void;
 }
@@ -39,19 +49,124 @@ const STAGE_LABELS: Record<string, string> = {
   llm_build_from_zero_plan: "大模型生成构建方案",
 };
 
+function formatPriceWithUnit(value: number | null | undefined, unit?: string | null) {
+  if (value === null || value === undefined) {
+    return "--";
+  }
+  const normalizedUnit = String(unit || "").trim() || "件";
+  return `${value} 元/${normalizedUnit}`;
+}
+
+function renderMarkdownBlocks(content: string) {
+  const lines = content.split(/\r?\n/);
+  const blocks: Array<
+    | { type: "heading"; level: number; text: string }
+    | { type: "list"; items: string[] }
+    | { type: "paragraph"; text: string }
+  > = [];
+
+  let currentList: string[] = [];
+  let currentParagraph: string[] = [];
+
+  const flushList = () => {
+    if (currentList.length) {
+      blocks.push({ type: "list", items: currentList });
+      currentList = [];
+    }
+  };
+
+  const flushParagraph = () => {
+    if (currentParagraph.length) {
+      blocks.push({ type: "paragraph", text: currentParagraph.join(" ") });
+      currentParagraph = [];
+    }
+  };
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) {
+      flushList();
+      flushParagraph();
+      continue;
+    }
+
+    const headingMatch = /^(#{1,6})\s+(.*)$/.exec(line);
+    if (headingMatch) {
+      flushList();
+      flushParagraph();
+      blocks.push({
+        type: "heading",
+        level: headingMatch[1].length,
+        text: headingMatch[2].trim(),
+      });
+      continue;
+    }
+
+    const listMatch = /^[-*]\s+(.*)$/.exec(line);
+    if (listMatch) {
+      flushParagraph();
+      currentList.push(listMatch[1].trim());
+      continue;
+    }
+
+    currentParagraph.push(line);
+  }
+
+  flushList();
+  flushParagraph();
+
+  return blocks.map((block, index) => {
+    if (block.type === "heading") {
+      if (block.level <= 2) {
+        return (
+          <h4 key={`heading-${index}`} className="markdown-block-heading">
+            {block.text}
+          </h4>
+        );
+      }
+      return (
+        <h5 key={`heading-${index}`} className="markdown-block-subheading">
+          {block.text}
+        </h5>
+      );
+    }
+    if (block.type === "list") {
+      return (
+        <ul key={`list-${index}`} className="markdown-block-list">
+          {block.items.map((item, itemIndex) => (
+            <li key={`item-${index}-${itemIndex}`}>{item}</li>
+          ))}
+        </ul>
+      );
+    }
+    return (
+      <p key={`paragraph-${index}`} className="markdown-block-paragraph">
+        {block.text}
+      </p>
+    );
+  });
+}
+
 export function Dashboard({
   tasks,
   selectedTask,
   isSubmitting,
+  isChatting,
   isCancelling,
   isPolling,
   canCancel,
-  onSubmit,
+  taskListError,
+  intakeMessages,
+  intakeReadyToStart,
+  onSendIntakeMessage,
+  onStartResearch,
   onCancelAllTasks,
   onSelectTask,
 }: DashboardProps) {
-  const [prompt, setPrompt] = useState("");
+  const [chatInput, setChatInput] = useState("");
   const [expandedStageKey, setExpandedStageKey] = useState<string | null>(null);
+  const stageListRef = useRef<HTMLDivElement | null>(null);
+  const chatListRef = useRef<HTMLDivElement | null>(null);
   const progressStages: StageStatus[] = selectedTask?.stages ?? [];
 
   const getWorkflowLabel = (workflowName: string) => WORKFLOW_LABELS[workflowName] ?? workflowName;
@@ -64,14 +179,36 @@ export function Dashboard({
     return stage.message ?? "";
   };
 
+  const scrollToLatest = (node: HTMLDivElement | null) => {
+    if (!node) {
+      return;
+    }
+    node.scrollTop = node.scrollHeight;
+  };
+
+  const updateStageScrollState = () => {
+    const node = stageListRef.current;
+    if (!node) {
+      return;
+    }
+  };
+
+  useEffect(() => {
+    scrollToLatest(stageListRef.current);
+  }, [progressStages, expandedStageKey, selectedTask]);
+
+  useEffect(() => {
+    scrollToLatest(chatListRef.current);
+  }, [intakeMessages, isChatting]);
+
   return (
     <div className="dashboard-shell">
       <aside className="history-panel">
         <div className="panel-header">
-          <p className="eyebrow">Timeline</p>
           <h2>历史任务</h2>
         </div>
         <div className="history-list">
+          {taskListError && <p className="history-error">历史任务加载失败</p>}
           {tasks.map((task) => (
             <button key={task.task_id} className="history-card" onClick={() => onSelectTask(task.task_id)}>
               <span className={`status-chip status-${task.status}`}>{task.status}</span>
@@ -79,25 +216,24 @@ export function Dashboard({
               <small>{task.summary ?? "等待结果"}</small>
             </button>
           ))}
+          {!taskListError && !tasks.length && <p className="empty-state">暂无历史任务。</p>}
         </div>
       </aside>
 
       <main className="workspace-panel">
         <section className="hero-panel">
           <div>
-            <p className="eyebrow">Command Center</p>
-            <h1>市场调研工作台</h1>
-            <p className="lead">输入调研需求，触发 LangGraph 工作流，查看价格报表与商业模式分析。</p>
+            <h1>市场调研助手</h1>
+            <p className="lead">输入调研需求，为您分析价格报表与商业模式</p>
           </div>
         </section>
 
         <section className="panel-grid">
-          <section className="glass-panel">
+          <section className="glass-panel progress-panel">
             <div className="panel-header">
-              <p className="eyebrow">Workflow</p>
               <h2>任务进度</h2>
             </div>
-            <div className="stage-list">
+            <div className="stage-list" ref={stageListRef} onScroll={updateStageScrollState}>
               {progressStages.map((stage, index) => (
                 (() => {
                   const stageKey = `${stage.workflow_name}-${stage.stage_name}-${stage.status}-${stage.message ?? ""}-${index}`;
@@ -141,33 +277,58 @@ export function Dashboard({
             </div>
           </section>
 
-          <section className="glass-panel">
+          <section className="glass-panel intake-panel">
             <div className="panel-header">
-              <p className="eyebrow">Command</p>
-              <h2>发起调研</h2>
+              <h2>开始调研</h2>
+            </div>
+            <div className="intake-chat-shell">
+              <div className="intake-chat-list" ref={chatListRef}>
+                {intakeMessages.length ? (
+                  intakeMessages.map((message, index) => (
+                    <div
+                      key={`${message.role}-${index}`}
+                      className={`chat-bubble chat-bubble-${message.role}`}
+                    >
+                      <span className="chat-role">{message.role === "assistant" ? "澄清助手" : "你"}</span>
+                      <p>{message.content}</p>
+                    </div>
+                  ))
+                ) : (
+                  <p className="empty-state"></p>
+                )}
+              </div>
             </div>
             <form
               className="prompt-form prompt-form-panel"
               onSubmit={(event) => {
                 event.preventDefault();
-                const trimmed = prompt.trim();
+                const trimmed = chatInput.trim();
                 if (!trimmed) {
                   return;
                 }
-                onSubmit(trimmed);
-                setPrompt("");
+                void onSendIntakeMessage(trimmed);
+                setChatInput("");
               }}
             >
-              <label htmlFor="research-prompt">调研需求</label>
               <textarea
                 id="research-prompt"
-                value={prompt}
-                onChange={(event) => setPrompt(event.target.value)}
-                placeholder="例如：调研中国大陆宠物烘干箱市场"
+                value={chatInput}
+                onChange={(event) => setChatInput(event.target.value)}
+                placeholder="例如：我想调研中国大陆宠物烘干箱市场，重点看价格和平台"
                 rows={3}
               />
+              <div className="chat-submit-row">
+                <button type="submit" className="hero-action-button chat-send-button" disabled={isChatting || isSubmitting || isCancelling}>
+                  {isChatting ? "发送中..." : "发送"}
+                </button>
+              </div>
               <div className="hero-actions">
-                <button type="submit" className="hero-action-button" disabled={isSubmitting || isCancelling}>
+                <button
+                  type="button"
+                  className="hero-action-button"
+                  disabled={!intakeReadyToStart || isSubmitting || isCancelling}
+                  onClick={onStartResearch}
+                >
                   {isSubmitting ? "提交中..." : "开始调研"}
                 </button>
                 <button
@@ -178,14 +339,15 @@ export function Dashboard({
                 >
                   {isCancelling ? "中止中..." : "中止调研"}
                 </button>
-                <span className="hero-status-text">{isPolling ? "当前任务进行中" : "等待新任务"}</span>
+                <span className="hero-status-text">
+                  {isPolling ? "当前任务进行中" : intakeReadyToStart ? "可开始调研" : "先继续澄清需求"}
+                </span>
               </div>
             </form>
           </section>
 
           <section className="glass-panel span-two">
             <div className="panel-header">
-              <p className="eyebrow">Charts</p>
               <h2>价格分析图表</h2>
             </div>
             <PriceChartsPanel priceReport={selectedTask?.price_report ?? null} />
@@ -193,7 +355,6 @@ export function Dashboard({
 
           <section className="glass-panel span-two">
             <div className="panel-header">
-              <p className="eyebrow">Results</p>
               <h2>价格表格</h2>
             </div>
             <div className="table-shell">
@@ -204,7 +365,6 @@ export function Dashboard({
                     <th>平台</th>
                     <th>价格页 URL</th>
                     <th>价格</th>
-                    <th>来源</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -221,8 +381,7 @@ export function Dashboard({
                           "--"
                         )}
                       </td>
-                      <td>{row.normalized_price ?? "--"}</td>
-                      <td>{row.source ?? "--"}</td>
+                      <td>{formatPriceWithUnit(row.normalized_price, row.price_unit)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -233,27 +392,28 @@ export function Dashboard({
 
           <section className="glass-panel span-two">
             <div className="panel-header">
-              <p className="eyebrow">Intelligence</p>
               <h2>市场分析</h2>
             </div>
             {selectedTask?.market_analysis ? (
               <div className="analysis-grid">
                 <article>
-                  <h3>如何赚钱</h3>
-                  <p>{selectedTask.market_analysis.revenue_model_text}</p>
+                  <h3>商业模式</h3>
+                  <div className="markdown-content">{renderMarkdownBlocks(selectedTask.market_analysis.revenue_model_text)}</div>
                 </article>
                 <article>
                   <h3>竞争与前景</h3>
-                  <p>{selectedTask.market_analysis.competition_text}</p>
+                  <div className="markdown-content">{renderMarkdownBlocks(selectedTask.market_analysis.competition_text)}</div>
                 </article>
                 <article>
-                  <h3>从 0 构建</h3>
-                  <p>{selectedTask.market_analysis.build_plan_text}</p>
+                  <h3>如何从零开始</h3>
+                  <div className="markdown-content">{renderMarkdownBlocks(selectedTask.market_analysis.build_plan_text)}</div>
                 </article>
                 {!!selectedTask.market_analysis.summary_json.data_quality?.length && (
                   <article>
                     <h3>数据质量提示</h3>
-                    <p>{selectedTask.market_analysis.summary_json.data_quality.join("；")}</p>
+                    <div className="markdown-content">
+                      {renderMarkdownBlocks(selectedTask.market_analysis.summary_json.data_quality.map((item) => `- ${item}`).join("\n"))}
+                    </div>
                   </article>
                 )}
               </div>

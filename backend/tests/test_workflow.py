@@ -316,6 +316,53 @@ def test_discover_platforms_returns_existing_real_results_after_three_rounds(mon
     assert result["product_platforms"][0]["platforms"][0]["source"] == "llm_web_search"
 
 
+def test_discover_platforms_continues_later_rounds_after_single_round_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = 0
+
+    def stub_search_web(self, prompt: str, fallback: dict[str, object]) -> LLMResult:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return LLMResult(
+                value={"platforms": []},
+                status="fallback",
+                message="火山方舟 web search 返回格式异常，本轮平台搜索结果已按空结果处理",
+            )
+        return LLMResult(
+            value={
+                "platforms": [
+                    {
+                        "platform_name": "京东",
+                        "platform_domain": "jd.com",
+                        "platform_url": "https://item.jd.com/1001.html",
+                        "platform_summary": "综合电商平台",
+                        "platform_type": "marketplace",
+                        "priority": 1,
+                        "reason": "有效",
+                    }
+                ]
+            },
+            status="success",
+        )
+
+    monkeypatch.setattr("app.services.llm_client.LLMClient.search_web", stub_search_web)
+
+    result = discover_platforms(
+        {
+            "prompt": "调研宠物烘干箱市场",
+            "products": [{"product_name": "宠物烘干箱", "source_type": "category_inferred", "input_order": 1}],
+        }
+    )
+
+    assert calls == 3
+    assert len(result["product_platforms"]) == 1
+    assert len(result["product_platforms"][0]["platforms"]) == 1
+    assert result["product_platforms"][0]["platforms"][0]["platform_domain"] == "jd.com"
+    assert any(stage["status"] == "fallback" for stage in result["stages"])
+
+
 def test_crawl_prices_parallel_uses_product_specific_platform_groups(monkeypatch: pytest.MonkeyPatch) -> None:
     captured = {}
 
@@ -733,6 +780,104 @@ def test_normalize_prices_reports_filter_and_dedup_stats() -> None:
     assert "删除 1 条空价格记录" in result["stages"][-1]["message"]
     assert "去重 1 条" in result["stages"][-1]["message"]
     assert result["stages"][-1]["detail_json"]["stats"]["final_count"] == 1
+
+
+def test_normalize_prices_sends_all_rows_with_minimal_fields_to_llm(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def stub_generate_json(self, prompt: str, fallback: dict[str, object]) -> LLMResult:
+        captured["prompt"] = prompt
+        captured["fallback"] = fallback
+        return LLMResult(
+            value={
+                "rows": [
+                    {
+                        "row_id": 0,
+                        "product_name": "RTX 4090",
+                        "platform_name": "平台A",
+                        "platform_domain": "a.example.com",
+                        "product_url": "https://a.example.com/item/1",
+                        "raw_title": "4090 A",
+                        "spec_text": "单卡",
+                        "currency": "CNY",
+                        "raw_price": 2.5,
+                        "normalized_price": 2.5,
+                        "price_unit": "小时",
+                    },
+                    {
+                        "row_id": 1,
+                        "product_name": "RTX 5090",
+                        "platform_name": "平台B",
+                        "platform_domain": "b.example.com",
+                        "product_url": "https://b.example.com/item/2",
+                        "raw_title": "5090 B",
+                        "spec_text": "包月",
+                        "currency": "CNY",
+                        "raw_price": 5000,
+                        "normalized_price": 5000,
+                        "price_unit": "件",
+                    },
+                ]
+            },
+            status="success",
+        )
+
+    monkeypatch.setattr("app.services.llm_client.LLMClient.generate_json", stub_generate_json)
+
+    result = normalize_prices(
+        {
+            "prompt": "调研GPU租赁市场",
+            "price_records": [
+                {
+                    "product_name": "4090",
+                    "platform_name": "平台A",
+                    "platform_domain": "a.example.com",
+                    "product_url": "https://a.example.com/item/1",
+                    "raw_title": "4090 A",
+                    "spec_text": "",
+                    "currency": "cny",
+                    "raw_price": 2.5,
+                    "normalized_price": 2.5,
+                    "price_unit": None,
+                    "confidence_score": 0.8,
+                    "attempt_count": 1,
+                    "source": "markdown_llm_price",
+                    "notes": "抓取成功",
+                    "markdown_excerpt": "很长的网页摘录A",
+                },
+                {
+                    "product_name": "5090",
+                    "platform_name": "平台B",
+                    "platform_domain": "b.example.com",
+                    "product_url": "https://b.example.com/item/2",
+                    "raw_title": "5090 B",
+                    "spec_text": "",
+                    "currency": "cny",
+                    "raw_price": 5000,
+                    "normalized_price": 5000,
+                    "price_unit": None,
+                    "confidence_score": 0.9,
+                    "attempt_count": 1,
+                    "source": "markdown_llm_price",
+                    "notes": "抓取成功",
+                    "markdown_excerpt": "很长的网页摘录B",
+                },
+            ],
+        }
+    )
+
+    prompt = str(captured["prompt"])
+    fallback = captured["fallback"]
+    assert "row_id" in prompt
+    assert "很长的网页摘录A" not in prompt
+    assert "很长的网页摘录B" not in prompt
+    assert "抓取成功" not in prompt
+    assert isinstance(fallback, dict)
+    assert len(fallback["rows"]) == 2
+    assert result["price_records"][0]["product_name"] == "RTX 4090"
+    assert result["price_records"][0]["price_unit"] == "小时"
+    assert result["price_records"][0]["markdown_excerpt"] == "很长的网页摘录A"
+    assert result["price_records"][1]["product_name"] == "RTX 5090"
 
 
 def test_analyze_prices_ignores_legacy_fallback_seed_warnings(monkeypatch: pytest.MonkeyPatch) -> None:

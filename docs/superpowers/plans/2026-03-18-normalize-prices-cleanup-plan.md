@@ -14,6 +14,7 @@
 
 4. Update `backend/src/app/workflows/research_workflow.py`
    - Use cleanup stats in `normalize_prices` stage message and detail.
+   - Keep LLM normalization, but pass only minimal fields for all rows instead of a special first-10 preview.
 
 5. Verify
    - Run targeted normalize tests.

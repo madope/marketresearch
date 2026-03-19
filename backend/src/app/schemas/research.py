@@ -10,6 +10,32 @@ class CreateResearchTaskRequest(BaseModel):
     prompt: str = Field(min_length=3)
 
 
+class IntakeMessage(BaseModel):
+    role: str
+    content: str = Field(min_length=1)
+
+
+class ResearchRequirementDraft(BaseModel):
+    market_topic: str = ""
+    target_region: str = ""
+    products: list[str] = Field(default_factory=list)
+    goals: list[str] = Field(default_factory=list)
+    constraints: dict[str, Any] = Field(default_factory=dict)
+
+
+class ResearchIntakeChatRequest(BaseModel):
+    messages: list[IntakeMessage] = Field(default_factory=list)
+    draft_requirement: ResearchRequirementDraft = Field(default_factory=ResearchRequirementDraft)
+
+
+class ResearchIntakeChatResponse(BaseModel):
+    assistant_message: str
+    draft_requirement: ResearchRequirementDraft
+    missing_fields: list[str]
+    ready_to_start: bool
+    final_prompt: str
+
+
 class TaskSummaryResponse(BaseModel):
     task_id: str
     prompt: str

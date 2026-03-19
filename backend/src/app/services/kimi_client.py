@@ -139,7 +139,7 @@ class KimiClient:
         result = LLMResult(
             value=fallback,
             status="fallback",
-            message="Kimi provider 当前未启用原生 web search，已降级到 fallback 平台发现",
+            message="Kimi provider 当前未启用原生 web search，本轮平台搜索结果已按空结果处理",
             provider="kimi",
             model=self.model,
             method="web_search",

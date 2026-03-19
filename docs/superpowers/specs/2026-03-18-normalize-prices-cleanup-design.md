@@ -12,6 +12,8 @@ Make `normalize_prices` a deterministic cleanup step for price records instead o
 - Normalize currency, numeric fields, attempt count, and price units.
 - Deduplicate rows by product, platform domain, product URL, and normalized price.
 - Prefer the more complete row when duplicates collide.
+- When calling the LLM normalization helper, send all rows but only minimal fields required for normalization.
+- Do not include large fields such as markdown excerpts or notes in the LLM prompt.
 
 ## Output
 

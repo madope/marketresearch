@@ -3,7 +3,11 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { Dashboard } from "../src/features/research/dashboard";
-import type { ResearchTaskDetail, ResearchTaskSummary } from "../src/features/research/types";
+import type {
+  IntakeMessage,
+  ResearchTaskDetail,
+  ResearchTaskSummary,
+} from "../src/features/research/types";
 
 vi.mock("echarts", () => ({
   init: () => ({
@@ -134,9 +138,9 @@ const detail: ResearchTaskDetail = {
     ],
   },
   market_analysis: {
-    revenue_model_text: "通过商品销售获利",
-    competition_text: "竞争激烈",
-    build_plan_text: "从供应链开始",
+    revenue_model_text: "## 盈利方式\n- 通过商品销售获利\n- 通过增值服务提高客单价",
+    competition_text: "## 竞争情况\n- 竞争激烈\n- 平台集中度较高",
+    build_plan_text: "## 构建步骤\n- 从供应链开始\n- 搭建渠道与平台",
     summary_json: { risks: ["平台抓取存在回退"], opportunities: [] },
   },
 };
@@ -196,6 +200,11 @@ const runningDetail: ResearchTaskDetail = {
   market_analysis: null,
 };
 
+const intakeMessages: IntakeMessage[] = [
+  { role: "user", content: "我想调研中国大陆宠物烘干箱市场" },
+  { role: "assistant", content: "还需要确认：更关注价格、平台分布，还是市场可行性？" },
+];
+
 describe("Dashboard", () => {
   it("renders task history and result panels", () => {
     render(
@@ -203,18 +212,24 @@ describe("Dashboard", () => {
         tasks={taskSummaries}
         selectedTask={detail}
         isSubmitting={false}
+        isChatting={false}
         isCancelling={false}
         isPolling={false}
         canCancel={false}
-        onSubmit={vi.fn()}
+        taskListError={null}
+        intakeMessages={intakeMessages}
+        intakeReadyToStart={false}
+        onSendIntakeMessage={vi.fn()}
+        onStartResearch={vi.fn()}
         onCancelAllTasks={vi.fn()}
         onSelectTask={vi.fn()}
       />,
     );
 
     expect(screen.getByText("历史任务")).toBeInTheDocument();
-    expect(screen.getByText("发起调研")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "开始调研" })).toBeInTheDocument();
     expect(screen.getByText("价格分析图表")).toBeInTheDocument();
+    expect(screen.getByText("商品价格区间趋势")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "市场分析" })).toBeInTheDocument();
     expect(screen.getByText("完成电动牙刷调研")).toBeInTheDocument();
     expect(screen.getByText("模型调用失败，已降级到 fallback 数据")).toBeInTheDocument();
@@ -223,30 +238,41 @@ describe("Dashboard", () => {
     expect(screen.getByText("error")).toBeInTheDocument();
     expect(screen.getByText("已生成价格报表：均价 199，最高价 259，最低价 169")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "https://jd.com/item/1" })).toBeInTheDocument();
+    expect(screen.getByText("盈利方式")).toBeInTheDocument();
+    expect(screen.getByText("通过商品销售获利")).toBeInTheDocument();
+    expect(screen.queryByText("## 盈利方式")).not.toBeInTheDocument();
   });
 
-  it("submits prompt input", async () => {
+  it("sends intake chat message", async () => {
     const user = userEvent.setup();
-    const onSubmit = vi.fn();
+    const onSendIntakeMessage = vi.fn();
 
     render(
       <Dashboard
         tasks={[]}
         selectedTask={null}
         isSubmitting={false}
+        isChatting={false}
         isCancelling={false}
         isPolling={false}
         canCancel={false}
-        onSubmit={onSubmit}
+        taskListError={null}
+        intakeMessages={[]}
+        intakeReadyToStart={false}
+        onSendIntakeMessage={onSendIntakeMessage}
+        onStartResearch={vi.fn()}
         onCancelAllTasks={vi.fn()}
         onSelectTask={vi.fn()}
       />,
     );
 
-    await user.type(screen.getByLabelText("调研需求"), "调研宠物烘干箱");
-    await user.click(screen.getByRole("button", { name: "开始调研" }));
+    await user.type(
+      screen.getByPlaceholderText("例如：我想调研中国大陆宠物烘干箱市场，重点看价格和平台"),
+      "调研宠物烘干箱",
+    );
+    await user.click(screen.getByRole("button", { name: "发送" }));
 
-    expect(onSubmit).toHaveBeenCalledWith("调研宠物烘干箱");
+    expect(onSendIntakeMessage).toHaveBeenCalledWith("调研宠物烘干箱");
   });
 
   it("shows completed stages and real running stages for active task", () => {
@@ -255,10 +281,15 @@ describe("Dashboard", () => {
         tasks={taskSummaries}
         selectedTask={runningDetail}
         isSubmitting={false}
+        isChatting={false}
         isCancelling={false}
         isPolling={true}
         canCancel={true}
-        onSubmit={vi.fn()}
+        taskListError={null}
+        intakeMessages={intakeMessages}
+        intakeReadyToStart={false}
+        onSendIntakeMessage={vi.fn()}
+        onStartResearch={vi.fn()}
         onCancelAllTasks={vi.fn()}
         onSelectTask={vi.fn()}
       />,
@@ -281,10 +312,15 @@ describe("Dashboard", () => {
         tasks={taskSummaries}
         selectedTask={runningDetail}
         isSubmitting={false}
+        isChatting={false}
         isCancelling={false}
         isPolling={true}
         canCancel={true}
-        onSubmit={vi.fn()}
+        taskListError={null}
+        intakeMessages={intakeMessages}
+        intakeReadyToStart={false}
+        onSendIntakeMessage={vi.fn()}
+        onStartResearch={vi.fn()}
         onCancelAllTasks={onCancelAllTasks}
         onSelectTask={vi.fn()}
       />,
@@ -303,10 +339,15 @@ describe("Dashboard", () => {
         tasks={taskSummaries}
         selectedTask={detail}
         isSubmitting={false}
+        isChatting={false}
         isCancelling={false}
         isPolling={false}
         canCancel={false}
-        onSubmit={vi.fn()}
+        taskListError={null}
+        intakeMessages={intakeMessages}
+        intakeReadyToStart={false}
+        onSendIntakeMessage={vi.fn()}
+        onStartResearch={vi.fn()}
         onCancelAllTasks={vi.fn()}
         onSelectTask={vi.fn()}
       />,
@@ -351,10 +392,15 @@ describe("Dashboard", () => {
         tasks={taskSummaries}
         selectedTask={duplicateStageDetail}
         isSubmitting={false}
+        isChatting={false}
         isCancelling={false}
         isPolling={false}
         canCancel={false}
-        onSubmit={vi.fn()}
+        taskListError={null}
+        intakeMessages={intakeMessages}
+        intakeReadyToStart={false}
+        onSendIntakeMessage={vi.fn()}
+        onStartResearch={vi.fn()}
         onCancelAllTasks={vi.fn()}
         onSelectTask={vi.fn()}
       />,
@@ -363,5 +409,59 @@ describe("Dashboard", () => {
     expect(screen.getByText("火山方舟 web search 请求失败：Connection error.")).toBeInTheDocument();
     expect(screen.getByText("火山方舟 web search 请求失败：Request timed out.")).toBeInTheDocument();
     expect(screen.getAllByText("大模型筛选平台")).toHaveLength(2);
+  });
+
+  it("shows ready-to-start guidance through assistant dialogue", () => {
+    render(
+      <Dashboard
+        tasks={taskSummaries}
+        selectedTask={null}
+        isSubmitting={false}
+        isChatting={false}
+        isCancelling={false}
+        isPolling={false}
+        canCancel={false}
+        taskListError={null}
+        intakeMessages={[
+          {
+            role: "assistant",
+            content: "我已经理解你的需求，接下来会围绕中国大陆宠物烘干箱市场展开分析。请点击下方按钮开始调研。",
+          },
+        ]}
+        intakeReadyToStart={true}
+        onSendIntakeMessage={vi.fn()}
+        onStartResearch={vi.fn()}
+        onCancelAllTasks={vi.fn()}
+        onSelectTask={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText("已确认需求")).not.toBeInTheDocument();
+    expect(screen.getByText(/请点击下方按钮开始调研/)).toBeInTheDocument();
+    expect(screen.getByText("可开始调研")).toBeInTheDocument();
+  });
+
+  it("shows task list error instead of silent empty history", () => {
+    render(
+      <Dashboard
+        tasks={[]}
+        selectedTask={null}
+        isSubmitting={false}
+        isChatting={false}
+        isCancelling={false}
+        isPolling={false}
+        canCancel={false}
+        taskListError="Request failed: 500"
+        intakeMessages={[]}
+        intakeReadyToStart={false}
+        onSendIntakeMessage={vi.fn()}
+        onStartResearch={vi.fn()}
+        onCancelAllTasks={vi.fn()}
+        onSelectTask={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("历史任务加载失败")).toBeInTheDocument();
+    expect(screen.queryByText("暂无历史任务。")).not.toBeInTheDocument();
   });
 });

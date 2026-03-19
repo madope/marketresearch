@@ -320,7 +320,7 @@ def _llm_select_final_platforms_for_product(
             if len(deduped) >= max_platforms:
                 break
 
-        if len(deduped) >= max_platforms or result.status != "success":
+        if len(deduped) >= max_platforms:
             break
 
     metrics = {
@@ -334,21 +334,38 @@ def _llm_select_final_platforms_for_product(
 
 def _llm_normalize_rows(prompt: str, rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     client = LLMClient()
-    preview_rows = rows[: min(10, len(rows))]
-    fallback_payload = {"rows": preview_rows}
+    llm_rows = [
+        {
+            "row_id": index,
+            "product_name": row.get("product_name"),
+            "platform_name": row.get("platform_name"),
+            "platform_domain": row.get("platform_domain"),
+            "product_url": row.get("product_url"),
+            "raw_title": row.get("raw_title"),
+            "spec_text": row.get("spec_text"),
+            "currency": row.get("currency"),
+            "raw_price": row.get("raw_price"),
+            "normalized_price": row.get("normalized_price"),
+            "price_unit": row.get("price_unit"),
+        }
+        for index, row in enumerate(rows)
+    ]
+    fallback_payload = {"rows": llm_rows}
     result = client.generate_json(
         f"""
 你是市场调研工作流的标准化节点。
 用户输入: {prompt}
-待标准化数据: {preview_rows}
+待标准化数据: {llm_rows}
 
 任务:
-统一产品名称、规格文案和币种字段，保留价格数值不变。
+统一产品名称、规格文案、币种和价格单位字段，保留价格数值与 URL 不变。
+必须处理输入中的所有 rows，并按相同 row_id 原样返回。
 
 返回 JSON:
 {{
   "rows": [
     {{
+      "row_id": 0,
       "product_name": "string",
       "platform_name": "string",
       "platform_domain": "string",
@@ -370,9 +387,29 @@ def _llm_normalize_rows(prompt: str, rows: list[dict[str, Any]]) -> tuple[list[d
         fallback=fallback_payload,
     )
     payload = result.value
-    normalized_rows = payload.get("rows", preview_rows)
-    if len(rows) > len(preview_rows):
-        normalized_rows = normalized_rows + rows[len(preview_rows) :]
+    normalized_fields_by_id = {
+        int(item.get("row_id")): item
+        for item in payload.get("rows", llm_rows)
+        if str(item.get("row_id", "")).strip().isdigit()
+    }
+    normalized_rows = []
+    for index, row in enumerate(rows):
+        normalized_fields = normalized_fields_by_id.get(index, {})
+        normalized_rows.append(
+            {
+                **row,
+                "product_name": normalized_fields.get("product_name", row.get("product_name")),
+                "platform_name": normalized_fields.get("platform_name", row.get("platform_name")),
+                "platform_domain": normalized_fields.get("platform_domain", row.get("platform_domain")),
+                "product_url": normalized_fields.get("product_url", row.get("product_url")),
+                "raw_title": normalized_fields.get("raw_title", row.get("raw_title")),
+                "spec_text": normalized_fields.get("spec_text", row.get("spec_text")),
+                "currency": normalized_fields.get("currency", row.get("currency")),
+                "raw_price": normalized_fields.get("raw_price", row.get("raw_price")),
+                "normalized_price": normalized_fields.get("normalized_price", row.get("normalized_price")),
+                "price_unit": normalized_fields.get("price_unit", row.get("price_unit")),
+            }
+        )
     return normalized_rows, _llm_stage(
         workflow_name="price_research",
         stage_name="llm_normalize_rows",
