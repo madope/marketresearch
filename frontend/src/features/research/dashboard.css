@@ -345,10 +345,10 @@
 
 .stage-row {
   display: grid;
-  grid-template-columns: 120px 1fr auto;
+  grid-template-columns: 96px minmax(0, 1fr);
   gap: 12px;
   padding: 12px 14px;
-  min-height: 88px;
+  min-height: 96px;
   align-items: start;
   border-radius: 16px;
   background: rgba(4, 14, 31, 0.96);
@@ -358,13 +358,25 @@
 .stage-body {
   display: grid;
   gap: 6px;
+  min-width: 0;
 }
 
 .stage-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.stage-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-left: auto;
 }
 
 .stage-message {
@@ -372,6 +384,8 @@
   color: rgba(236, 255, 255, 0.72);
   font-size: 13px;
   line-height: 1.5;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .stage-toggle {
@@ -389,6 +403,50 @@
   padding: 12px;
   border-radius: 14px;
   background: rgba(2, 11, 28, 0.82);
+  border: 1px solid rgba(94, 244, 255, 0.12);
+}
+
+.stage-detail-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 72px 24px 24px;
+  background: rgba(3, 10, 24, 0.52);
+}
+
+.stage-detail-modal {
+  width: min(920px, 100%);
+  max-height: calc(100vh - 96px);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 20px;
+  border-radius: 20px;
+  background: rgba(8, 22, 46, 0.98);
+  border: 1px solid rgba(118, 228, 255, 0.2);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.36);
+}
+
+.stage-detail-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.stage-detail-modal-header h3 {
+  margin: 0;
+  color: #dffcff;
+}
+
+.stage-detail-modal-content {
+  overflow: auto;
+  padding: 16px;
+  border-radius: 14px;
+  background: rgba(2, 11, 28, 0.92);
   border: 1px solid rgba(94, 244, 255, 0.12);
 }
 
@@ -411,11 +469,11 @@
 }
 
 .stage-status-label {
-  align-self: start;
   border-radius: 999px;
   padding: 4px 10px;
   font-size: 12px;
   text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .stage-status-completed {

@@ -229,7 +229,7 @@ describe("Dashboard", () => {
     expect(screen.getByText("历史任务")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "开始调研" })).toBeInTheDocument();
     expect(screen.getByText("价格分析图表")).toBeInTheDocument();
-    expect(screen.getByText("商品价格区间趋势")).toBeInTheDocument();
+    expect(screen.getByText("商品价格统计")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "市场分析" })).toBeInTheDocument();
     expect(screen.getByText("完成电动牙刷调研")).toBeInTheDocument();
     expect(screen.getByText("模型调用失败，已降级到 fallback 数据")).toBeInTheDocument();
@@ -267,7 +267,7 @@ describe("Dashboard", () => {
     );
 
     await user.type(
-      screen.getByPlaceholderText("例如：我想调研中国大陆宠物烘干箱市场，重点看价格和平台"),
+      screen.getByPlaceholderText("例如：我想调研国内GPU服务器市场，重点关注价格和平台"),
       "调研宠物烘干箱",
     );
     await user.click(screen.getByRole("button", { name: "发送" }));
@@ -301,6 +301,48 @@ describe("Dashboard", () => {
     expect(screen.getByText("执行中")).toBeInTheDocument();
     expect(screen.getAllByText("running")).toHaveLength(1);
     expect(screen.queryByText("分析盈利模式")).not.toBeInTheDocument();
+  });
+
+  it("renders market analysis incrementally from completed stage details", () => {
+    const partialMarketAnalysisDetail: ResearchTaskDetail = {
+      ...runningDetail,
+      stages: [
+        ...runningDetail.stages,
+        {
+          workflow_name: "market_analysis",
+          stage_name: "analyze_revenue_model",
+          status: "completed",
+          message: "已输出盈利模式摘要：通过平台抽成与租赁获利",
+          retry_count: 0,
+          detail_json: {
+            revenue_model_text: "## 盈利方式\n- 通过平台抽成与租赁获利",
+          },
+        },
+      ],
+    };
+
+    render(
+      <Dashboard
+        tasks={taskSummaries}
+        selectedTask={partialMarketAnalysisDetail}
+        isSubmitting={false}
+        isChatting={false}
+        isCancelling={false}
+        isPolling={true}
+        canCancel={true}
+        taskListError={null}
+        intakeMessages={intakeMessages}
+        intakeReadyToStart={false}
+        onSendIntakeMessage={vi.fn()}
+        onStartResearch={vi.fn()}
+        onCancelAllTasks={vi.fn()}
+        onSelectTask={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("商业模式")).toBeInTheDocument();
+    expect(screen.getByText("通过平台抽成与租赁获利")).toBeInTheDocument();
+    expect(screen.getAllByText("等待生成中...").length).toBeGreaterThan(0);
   });
 
   it("cancels all active tasks from the hero panel", async () => {
@@ -357,11 +399,12 @@ describe("Dashboard", () => {
 
     await user.click(screen.getAllByRole("button", { name: "查看详情" })[0]);
 
+    expect(screen.getByRole("dialog", { name: "步骤详情弹窗" })).toBeInTheDocument();
     expect(screen.getByText("步骤详情")).toBeInTheDocument();
     expect(screen.getByText(/"provider": "volcengine"/, { selector: "pre" })).toBeInTheDocument();
     expect(screen.getByText(/"method": "json"/, { selector: "pre" })).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "收起详情" }));
+    await user.click(screen.getByRole("button", { name: "关闭详情" }));
 
     expect(screen.queryByText("步骤详情")).not.toBeInTheDocument();
   });

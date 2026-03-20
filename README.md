@@ -52,7 +52,39 @@ npm install
 npm run dev
 ```
 
-前端默认请求 `http://localhost:8000/api`，也可通过 `VITE_API_BASE_URL` 覆盖。
+前端默认通过 Vite 代理请求 `/api`，再转发到本机后端 `http://127.0.0.1:8000`。如需覆盖，可通过 `VITE_API_BASE_URL` 指定。
+
+### 3. 局域网访问
+
+如果要让同一局域网内的其他电脑访问当前 MacBook 上的页面：
+
+1. 后端仍按本地方式启动：
+
+```bash
+cd backend
+uvicorn app.main:app --reload
+```
+
+2. 前端使用局域网模式启动：
+
+```bash
+cd frontend
+npm run dev:lan
+```
+
+3. 查询当前 MacBook 的局域网 IP：
+
+```bash
+ipconfig getifaddr en0
+```
+
+4. 在同一局域网的其他电脑上访问：
+
+```text
+http://<你的局域网IP>:5173
+```
+
+因为前端默认走相对路径 `/api`，局域网访问时页面请求会先打到 Vite，再由 Vite 代理到本机后端，所以不需要额外修改前端 API 地址，也不需要把后端直接暴露到局域网。
 
 ## 测试
 

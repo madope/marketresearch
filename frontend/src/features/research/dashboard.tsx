@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { PriceChartsPanel } from "./price_charts";
 import type {
   IntakeMessage,
+  MarketAnalysis,
   ResearchTaskDetail,
   ResearchTaskSummary,
   StageStatus,
@@ -147,6 +148,68 @@ function renderMarkdownBlocks(content: string) {
   });
 }
 
+function buildLiveMarketAnalysis(
+  selectedTask: ResearchTaskDetail | null,
+  progressStages: StageStatus[],
+): MarketAnalysis | null {
+  const persisted = selectedTask?.market_analysis ?? null;
+  const live: MarketAnalysis = {
+    revenue_model_text: persisted?.revenue_model_text ?? "",
+    competition_text: persisted?.competition_text ?? "",
+    build_plan_text: persisted?.build_plan_text ?? "",
+    summary_json: {
+      risks: persisted?.summary_json?.risks ?? [],
+      opportunities: persisted?.summary_json?.opportunities ?? [],
+      data_quality: persisted?.summary_json?.data_quality ?? [],
+    },
+  };
+
+  for (const stage of progressStages) {
+    const detail = stage.detail_json as Record<string, unknown> | null | undefined;
+    if (!detail) {
+      continue;
+    }
+    if (stage.stage_name === "extract_business_topic" && detail.summary_json && typeof detail.summary_json === "object") {
+      const summaryJson = detail.summary_json as Record<string, unknown>;
+      live.summary_json = {
+        risks: Array.isArray(summaryJson.risks) ? summaryJson.risks.map((item) => String(item)) : live.summary_json.risks,
+        opportunities: Array.isArray(summaryJson.opportunities)
+          ? summaryJson.opportunities.map((item) => String(item))
+          : live.summary_json.opportunities,
+        data_quality: Array.isArray(summaryJson.data_quality)
+          ? summaryJson.data_quality.map((item) => String(item))
+          : live.summary_json.data_quality,
+      };
+    }
+    if (stage.stage_name === "analyze_revenue_model" && typeof detail.revenue_model_text === "string") {
+      live.revenue_model_text = detail.revenue_model_text;
+    }
+    if (stage.stage_name === "analyze_competition_and_outlook" && typeof detail.competition_text === "string") {
+      live.competition_text = detail.competition_text;
+    }
+    if (stage.stage_name === "build_from_zero_plan" && typeof detail.build_plan_text === "string") {
+      live.build_plan_text = detail.build_plan_text;
+      if (detail.summary_json && typeof detail.summary_json === "object") {
+        const summaryJson = detail.summary_json as Record<string, unknown>;
+        live.summary_json = {
+          risks: Array.isArray(summaryJson.risks) ? summaryJson.risks.map((item) => String(item)) : live.summary_json.risks,
+          opportunities: Array.isArray(summaryJson.opportunities)
+            ? summaryJson.opportunities.map((item) => String(item))
+            : live.summary_json.opportunities,
+          data_quality: Array.isArray(summaryJson.data_quality)
+            ? summaryJson.data_quality.map((item) => String(item))
+            : live.summary_json.data_quality,
+        };
+      }
+    }
+  }
+
+  if (!live.revenue_model_text && !live.competition_text && !live.build_plan_text && !live.summary_json.data_quality?.length) {
+    return null;
+  }
+  return live;
+}
+
 export function Dashboard({
   tasks,
   selectedTask,
@@ -164,10 +227,11 @@ export function Dashboard({
   onSelectTask,
 }: DashboardProps) {
   const [chatInput, setChatInput] = useState("");
-  const [expandedStageKey, setExpandedStageKey] = useState<string | null>(null);
+  const [activeStageDetail, setActiveStageDetail] = useState<{ key: string; title: string; content: string } | null>(null);
   const stageListRef = useRef<HTMLDivElement | null>(null);
   const chatListRef = useRef<HTMLDivElement | null>(null);
   const progressStages: StageStatus[] = selectedTask?.stages ?? [];
+  const liveMarketAnalysis = buildLiveMarketAnalysis(selectedTask, progressStages);
 
   const getWorkflowLabel = (workflowName: string) => WORKFLOW_LABELS[workflowName] ?? workflowName;
   const getStageLabel = (stageName: string) => STAGE_LABELS[stageName] ?? stageName;
@@ -195,7 +259,7 @@ export function Dashboard({
 
   useEffect(() => {
     scrollToLatest(stageListRef.current);
-  }, [progressStages, expandedStageKey, selectedTask]);
+  }, [progressStages, selectedTask]);
 
   useEffect(() => {
     scrollToLatest(chatListRef.current);
@@ -203,6 +267,22 @@ export function Dashboard({
 
   return (
     <div className="dashboard-shell">
+      {activeStageDetail && (
+        <div className="stage-detail-overlay" role="dialog" aria-modal="true" aria-label="步骤详情弹窗">
+          <div className="stage-detail-modal">
+            <div className="stage-detail-modal-header">
+              <div>
+                <p className="stage-detail-label">步骤详情</p>
+                <h3>{activeStageDetail.title}</h3>
+              </div>
+              <button type="button" className="stage-toggle" onClick={() => setActiveStageDetail(null)}>
+                关闭详情
+              </button>
+            </div>
+            <pre className="stage-detail-content stage-detail-modal-content">{activeStageDetail.content}</pre>
+          </div>
+        </div>
+      )}
       <aside className="history-panel">
         <div className="panel-header">
           <h2>历史任务</h2>
@@ -237,38 +317,39 @@ export function Dashboard({
               {progressStages.map((stage, index) => (
                 (() => {
                   const stageKey = `${stage.workflow_name}-${stage.stage_name}-${stage.status}-${stage.message ?? ""}-${index}`;
-                  const isExpanded = expandedStageKey === stageKey;
                   const canShowDetails =
                     stage.status !== "running" && (Boolean(stage.message) || Boolean(stage.detail_json));
 
                   return (
                     <div
                       key={stageKey}
-                      className={`stage-row stage-status-${stage.status} ${isExpanded ? "stage-row-expanded" : ""}`}
+                      className={`stage-row stage-status-${stage.status}`}
                     >
                       <span>{getWorkflowLabel(stage.workflow_name)}</span>
                       <div className="stage-body">
                         <div className="stage-header">
                           <strong>{getStageLabel(stage.stage_name)}</strong>
-                          {canShowDetails && (
-                            <button
-                              type="button"
-                              className="stage-toggle"
-                              onClick={() => setExpandedStageKey(isExpanded ? null : stageKey)}
-                            >
-                              {isExpanded ? "收起详情" : "查看详情"}
-                            </button>
-                          )}
+                          <div className="stage-actions">
+                            {canShowDetails && (
+                              <button
+                                type="button"
+                                className="stage-toggle"
+                                onClick={() =>
+                                  setActiveStageDetail({
+                                    key: stageKey,
+                                    title: `${getWorkflowLabel(stage.workflow_name)} / ${getStageLabel(stage.stage_name)}`,
+                                    content: formatStageDetail(stage),
+                                  })
+                                }
+                              >
+                                查看详情
+                              </button>
+                            )}
+                            <small className={`stage-status-label stage-status-label-${stage.status}`}>{stage.status}</small>
+                          </div>
                         </div>
                         {stage.message && <p className="stage-message">{stage.message}</p>}
-                        {isExpanded && canShowDetails && (
-                          <div className="stage-detail-panel">
-                            <p className="stage-detail-label">步骤详情</p>
-                            <pre className="stage-detail-content">{formatStageDetail(stage)}</pre>
-                          </div>
-                        )}
                       </div>
-                      <small className={`stage-status-label stage-status-label-${stage.status}`}>{stage.status}</small>
                     </div>
                   );
                 })()
@@ -314,7 +395,7 @@ export function Dashboard({
                 id="research-prompt"
                 value={chatInput}
                 onChange={(event) => setChatInput(event.target.value)}
-                placeholder="例如：我想调研中国大陆宠物烘干箱市场，重点看价格和平台"
+                placeholder="例如：我想调研国内GPU服务器市场，重点关注价格和平台"
                 rows={3}
               />
               <div className="chat-submit-row">
@@ -394,25 +475,37 @@ export function Dashboard({
             <div className="panel-header">
               <h2>市场分析</h2>
             </div>
-            {selectedTask?.market_analysis ? (
+            {liveMarketAnalysis ? (
               <div className="analysis-grid">
                 <article>
                   <h3>商业模式</h3>
-                  <div className="markdown-content">{renderMarkdownBlocks(selectedTask.market_analysis.revenue_model_text)}</div>
+                  <div className="markdown-content">
+                    {liveMarketAnalysis.revenue_model_text
+                      ? renderMarkdownBlocks(liveMarketAnalysis.revenue_model_text)
+                      : <p className="empty-state">等待生成中...</p>}
+                  </div>
                 </article>
                 <article>
                   <h3>竞争与前景</h3>
-                  <div className="markdown-content">{renderMarkdownBlocks(selectedTask.market_analysis.competition_text)}</div>
+                  <div className="markdown-content">
+                    {liveMarketAnalysis.competition_text
+                      ? renderMarkdownBlocks(liveMarketAnalysis.competition_text)
+                      : <p className="empty-state">等待生成中...</p>}
+                  </div>
                 </article>
                 <article>
                   <h3>如何从零开始</h3>
-                  <div className="markdown-content">{renderMarkdownBlocks(selectedTask.market_analysis.build_plan_text)}</div>
+                  <div className="markdown-content">
+                    {liveMarketAnalysis.build_plan_text
+                      ? renderMarkdownBlocks(liveMarketAnalysis.build_plan_text)
+                      : <p className="empty-state">等待生成中...</p>}
+                  </div>
                 </article>
-                {!!selectedTask.market_analysis.summary_json.data_quality?.length && (
+                {!!liveMarketAnalysis.summary_json.data_quality?.length && (
                   <article>
                     <h3>数据质量提示</h3>
                     <div className="markdown-content">
-                      {renderMarkdownBlocks(selectedTask.market_analysis.summary_json.data_quality.map((item) => `- ${item}`).join("\n"))}
+                      {renderMarkdownBlocks(liveMarketAnalysis.summary_json.data_quality.map((item) => `- ${item}`).join("\n"))}
                     </div>
                   </article>
                 )}

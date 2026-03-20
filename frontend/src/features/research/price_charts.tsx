@@ -102,96 +102,6 @@ export function PriceChartsPanel({ priceReport }: PriceChartsPanelProps) {
         }
       : null;
 
-  const platformAverageOption = priceReport.charts?.platform_average_prices.length
-    ? {
-        tooltip: {
-          trigger: "axis",
-          formatter: (params: Array<{ name: string; data: number }>) => {
-            const item = params[0];
-            if (!item) {
-              return "";
-            }
-            return `${item.name}<br/>均价: ${formatPriceWithUnit(item.data, platformUnitLookup.get(item.name))}`;
-          },
-        },
-        grid: { left: 80, right: 20, top: 24, bottom: 24 },
-        xAxis: {
-          type: "value",
-          axisLabel: { color: "#dffcff" },
-        },
-        yAxis: {
-          type: "category",
-          data: priceReport.charts.platform_average_prices.map((item) => item.platform_name),
-          axisLabel: { color: "#dffcff" },
-        },
-        series: [
-          {
-            type: "bar",
-            data: priceReport.charts.platform_average_prices.map((item) => item.average_price),
-          },
-        ],
-      }
-    : null;
-
-  const coverageOption =
-    priceReport.charts?.coverage_matrix.products.length && priceReport.charts.coverage_matrix.platforms.length
-      ? {
-          tooltip: {
-            trigger: "item",
-            formatter: (params: { value: [number, number, number] }) => {
-              const [platformIndex, productIndex, hasPrice] = params.value;
-              const productName = priceReport.charts?.coverage_matrix.products[productIndex] ?? "";
-              const platformName = priceReport.charts?.coverage_matrix.platforms[platformIndex] ?? "";
-              const cell = priceReport.charts?.coverage_matrix.cells.find(
-                (item) => item.product_name === productName && item.platform_name === platformName,
-              );
-              if (!cell) {
-                return `${productName}<br/>${platformName}`;
-              }
-              return `${productName}<br/>${platformName}<br/>${hasPrice ? formatPriceWithUnit(cell.price, rowUnitLookup.get(`${productName}::${platformName}`)) : "无价格"}`;
-            },
-          },
-          grid: { left: 70, right: 20, top: 28, bottom: 50 },
-          xAxis: {
-            type: "category",
-            data: priceReport.charts.coverage_matrix.platforms,
-            axisLabel: { color: "#dffcff", rotate: 18 },
-          },
-          yAxis: {
-            type: "category",
-            data: priceReport.charts.coverage_matrix.products,
-            axisLabel: { color: "#dffcff" },
-          },
-          visualMap: {
-            min: 0,
-            max: 1,
-            calculable: false,
-            orient: "horizontal",
-            left: "center",
-            bottom: 0,
-            inRange: {
-              color: ["#132846", "#36e7ff"],
-            },
-            textStyle: { color: "#dffcff" },
-          },
-          series: [
-            {
-              type: "heatmap",
-              data: priceReport.charts.coverage_matrix.cells.map((cell) => [
-                priceReport.charts?.coverage_matrix.platforms.indexOf(cell.platform_name) ?? 0,
-                priceReport.charts?.coverage_matrix.products.indexOf(cell.product_name) ?? 0,
-                cell.has_price ? 1 : 0,
-              ]),
-              label: {
-                show: true,
-                color: "#03111f",
-                formatter: ({ value }: { value: [number, number, number] }) => (value[2] ? "有价" : "无价"),
-              },
-            },
-          ],
-        }
-      : null;
-
   const productPriceRangeOption = priceReport.charts?.product_price_ranges.length
     ? {
         tooltip: {
@@ -234,9 +144,7 @@ export function PriceChartsPanel({ priceReport }: PriceChartsPanelProps) {
   return (
     <div className="chart-grid">
       <ChartCard title="商品平台价格对比" option={productPriceOption} emptyMessage="暂无可用价格对比数据。" />
-      <ChartCard title="平台均价对比" option={platformAverageOption} emptyMessage="暂无平台均价数据。" />
-      <ChartCard title="商品价格区间趋势" option={productPriceRangeOption} emptyMessage="暂无商品价格区间数据。" />
-      <ChartCard title="商品平台覆盖热力图" option={coverageOption} emptyMessage="暂无平台覆盖数据。" />
+      <ChartCard title="商品价格统计" option={productPriceRangeOption} emptyMessage="暂无商品价格统计数据。" />
     </div>
   );
 }
